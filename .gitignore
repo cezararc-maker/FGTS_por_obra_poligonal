@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Dados operacionais e sensíveis
+*.xlsx
+*.xls
+*.xlsm
+*.csv
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.html
+*.har
+
+# Evidências locais / downloads / logs
+entrada/
+saida/
+downloads/
+evidencias/
+screenshots/
+logs/
+runs/
+checkpoints/
+
+# Configurações locais
+.env
+.env.*
+config.local.toml
+config.local.yaml
+config.local.yml
