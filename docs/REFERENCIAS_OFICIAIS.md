@@ -1,33 +1,62 @@
-# Referências oficiais
+# Referências oficiais e técnicas
 
-Referências consultadas na fase de arquitetura.
+Referências consultadas na fase de arquitetura. Elas servem para validar regras e possibilidades técnicas, mas **não substituem o levantamento da interface real** para definição de seletores, estados e validações.
 
-## FGTS Digital — serviço oficial
+## FGTS Digital — página oficial
 
-- Ministério do Trabalho e Emprego / Gov.br — Emissão de Guia para Recolhimento do FGTS através do FGTS Digital:
-  https://www.gov.br/pt-br/servicos/emissao-de-guia-para-recolhimento-do-fgts-atraves-do-fgts-digital
+- Ministério do Trabalho e Emprego — FGTS Digital:
+  https://www.gov.br/trabalho-e-emprego/pt-br/servicos/empregador/fgtsdigital
 
-## Manual do FGTS Digital
+- Manual e Documentação Técnica:
+  https://www.gov.br/trabalho-e-emprego/pt-br/servicos/empregador/fgtsdigital/manual-e-documentacao-tecnica
 
-- Ministério do Trabalho e Emprego — Manual de Orientação do FGTS Digital, versão 1.60, de 05/05/2026:
-  https://www.gov.br/trabalho-e-emprego/pt-br/servicos/empregador/fgtsdigital/manual-e-documentacao-tecnica/manual-do-orientacao-do-fgts-digital-versao-1-60-05-05-2026.pdf
+Na data desta análise, a página oficial lista o **Manual do FGTS Digital — versão 1.70, de 12/06/2026**.
 
-Na versão consultada, a funcionalidade de Guia Parametrizada documenta filtros de competência e opções de pesquisa que incluem CNO, além do fluxo de seleção de débitos, definição de vencimento e emissão.
+## Manual do FGTS Digital — versão 1.70
 
-## Perguntas frequentes — FGTS Digital
+- Ministério do Trabalho e Emprego — Manual de Orientação do FGTS Digital, versão 1.70, de 12/06/2026:
+  https://www.gov.br/trabalho-e-emprego/pt-br/servicos/empregador/fgtsdigital/manual-e-documentacao-tecnica/manual-de-orientacao-do-fgts-digital-versao-1-70-12-06-2026.pdf
+
+O manual atual documenta o fluxo da Guia Parametrizada e o tratamento de débitos de FGTS e consignado.
+
+## Perguntas Frequentes — FGTS Digital
 
 - Ministério do Trabalho e Emprego — Perguntas Frequentes:
   https://www.gov.br/trabalho-e-emprego/pt-br/servicos/empregador/fgtsdigital/perguntas-frequentes
 
-A referência confirma a regra de vencimento mensal no dia 20 do mês seguinte e a antecipação para o dia útil imediatamente anterior quando o dia 20 não for útil.
+As FAQs oficiais registram que a Guia Parametrizada possui etapa específica para débitos consignados e que esses valores podem compor a mesma guia juntamente com FGTS.
+
+## Relatórios/detalhamentos
+
+A documentação do FGTS Digital descreve opções de detalhamento e relatórios em PDF/CSV associados às guias. A automação só deverá implementar esses downloads depois de confirmar os controles reais na interface em uso.
 
 ## Lei nº 8.036/1990
 
 - Presidência da República / Planalto — Lei nº 8.036/1990, texto compilado:
   https://www.planalto.gov.br/ccivil_03/leis/l8036compilada.htm
 
-O art. 15 estabelece o depósito até o vigésimo dia de cada mês relativamente à remuneração do mês anterior.
+O projeto manterá a regra de vencimento desacoplada da interface, com validação específica do calendário aplicável.
 
-## Observação de projeto
+## Playwright — conexão a navegador Chromium existente
 
-As referências oficiais servem para validar regras de negócio e compreender o fluxo funcional. Elas **não substituem o levantamento da interface real** para definição de seletores, estados e validações técnicas da automação.
+- Documentação oficial do Playwright para Python — `BrowserType.connect_over_cdp`:
+  https://playwright.dev/python/docs/api/class-browsertype#browser-type-connect-over-cdp
+
+A documentação informa que a conexão por CDP funciona apenas com navegadores baseados em Chromium e possui fidelidade inferior ao protocolo nativo do Playwright. Portanto, será usada somente após validação das funções críticas no ambiente real.
+
+## Chrome — depuração remota
+
+- Chrome for Developers — Changes to remote debugging switches to improve security:
+  https://developer.chrome.com/blog/remote-debugging-port
+
+Desde o Chrome 136, os parâmetros de depuração remota não são respeitados quando apontam para o diretório padrão de dados do Chrome. É necessário usar um `--user-data-dir` não padrão. Isso reforça a arquitetura com um perfil dedicado da automação, separado do perfil principal do usuário.
+
+## Regra de projeto
+
+Nenhuma documentação, screenshot de manual ou conhecimento prévio será usado para inventar seletores CSS/XPath, URLs internas ou comportamento de telas. Para cada etapa real do portal serão coletados:
+
+- estado esperado antes da ação;
+- elemento real;
+- ação realizada;
+- estado verificável após a ação;
+- comportamento em falha.
