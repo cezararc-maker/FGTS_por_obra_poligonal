@@ -62,8 +62,6 @@ def _extrair_datas_visiveis(page: Page) -> list[str]:
     except Exception:
         pass
 
-    # Alguns componentes do portal mantêm a data somente no value do input,
-    # sem incluí-la imediatamente no innerText da página.
     try:
         inputs = pf._visiveis(page.locator("input"))
         for campo in inputs:
@@ -75,17 +73,10 @@ def _extrair_datas_visiveis(page: Page) -> list[str]:
     except Exception:
         pass
 
-    # Preserva a ordem e remove duplicidades.
     return list(dict.fromkeys(datas))
 
 
 def _validar_vencimento(page: Page, vencimento: date, timeout_ms: int = 60_000) -> str:
-    """Aguarda a etapa Definir Vencimento terminar de carregar e valida a data.
-
-    Essa tela pode levar mais tempo que as anteriores. Enquanto os totais são
-    calculados, o campo 'Vencimento da Guia' pode permanecer vazio. Por isso a
-    validação é baseada em estado real, e não em uma pausa fixa.
-    """
     esperado = vencimento.strftime("%d/%m/%Y")
     limite = time.monotonic() + timeout_ms / 1000
     ultimas_datas: list[str] = []
@@ -96,11 +87,8 @@ def _validar_vencimento(page: Page, vencimento: date, timeout_ms: int = 60_000) 
             ultimas_datas = datas
         if esperado in datas:
             return esperado
-
-        # Fallback adicional para componentes que renderizam o valor fora de input.
         if esperado in _texto_pagina(page):
             return esperado
-
         page.wait_for_timeout(300)
 
     raise pf.PortalFlowError(
@@ -111,65 +99,80 @@ def _validar_vencimento(page: Page, vencimento: date, timeout_ms: int = 60_000) 
 
 
 def _campo_tag(page: Page) -> Locator:
-    # Primeiro tenta associação semântica direta. O portal usa 'Tag (Opcional)',
-    # portanto não exigimos igualdade exata com 'TAG'.
+    """Localiza TAG somente por relações estruturais determinísticas.
+
+    Não usa mais proximidade geométrica nem índice global de inputs. Isso evita
+    que um Locator baseado em posição passe a apontar para outro campo depois de
+    um rerender do Angular.
+    """
+    # 1) Associação semântica label -> campo, quando o portal a expõe.
     candidatos = pf._visiveis(page.get_by_label(re.compile(r"tag", re.IGNORECASE)))
-    campos = [item for item in candidatos if item.evaluate("el => ['INPUT','TEXTAREA'].includes(el.tagName)")]
+    campos = []
+    for item in candidatos:
+        try:
+            if item.evaluate("el => ['INPUT','TEXTAREA'].includes(el.tagName)"):
+                campos.append(item)
+        except Exception:
+            pass
     if len(campos) == 1:
         return campos[0]
     if len(campos) > 1:
-        raise pf.PortalFlowError("Mais de um campo associado ao rótulo TAG foi encontrado.")
+        raise pf.PortalFlowError("Mais de um campo associado semanticamente ao rótulo TAG foi encontrado.")
 
-    # Depois tenta atributos estáveis contendo 'tag'.
+    # 2) Atributos funcionais estáveis contendo TAG.
     candidatos = pf._visiveis(
         page.locator(
             "input[name*='tag' i], textarea[name*='tag' i], "
-            "input[id*='tag' i], textarea[id*='tag' i], "
             "input[aria-label*='tag' i], textarea[aria-label*='tag' i]"
         )
     )
     if len(candidatos) == 1:
         return candidatos[0]
     if len(candidatos) > 1:
-        raise pf.PortalFlowError("Mais de um campo candidato para TAG foi encontrado na tela.")
+        raise pf.PortalFlowError("Mais de um campo com atributo funcional de TAG foi encontrado.")
 
-    # Fallback controlado: procura o texto 'Tag (Opcional)' e o campo visível mais próximo.
-    rotulos = pf._visiveis(page.get_by_text(re.compile(r"^Tag(?:\s*\(Opcional\))?$", re.IGNORECASE)))
+    # 3) Relação estrutural estável: rótulo exato 'Tag (Opcional)' -> primeiro input seguinte.
+    # O Locator é reconstruído por esta mesma relação sempre que necessário; não
+    # dependemos da posição ordinal dos inputs na página.
+    rotulos = pf._visiveis(page.get_by_text(re.compile(r"^Tag\s*\(Opcional\)$", re.IGNORECASE)))
     if len(rotulos) != 1:
-        raise pf.PortalFlowError("O rótulo TAG não foi localizado de forma única na etapa Definir Vencimento.")
+        raise pf.PortalFlowError(
+            "O rótulo exato 'Tag (Opcional)' não foi localizado de forma única. "
+            "A automação não usará aproximação visual para evitar preencher campo incorreto."
+        )
 
-    rotulo = rotulos[0]
-    rx, ry = pf._centro(rotulo)
-    candidatos = pf._visiveis(page.locator("input:enabled, textarea:enabled"))
-    medidos: list[tuple[float, Locator]] = []
-    for campo in candidatos:
-        try:
-            cx, cy = pf._centro(campo)
-        except Exception:
-            continue
-        if cy < ry - 20:
-            continue
-        distancia = ((cx - rx) ** 2 + (cy - ry) ** 2) ** 0.5
-        medidos.append((distancia, campo))
-
-    if not medidos:
-        raise pf.PortalFlowError("Nenhum campo editável foi associado com segurança ao rótulo TAG.")
-    medidos.sort(key=lambda item: item[0])
-    if len(medidos) > 1 and abs(medidos[1][0] - medidos[0][0]) < 5:
-        raise pf.PortalFlowError("Dois campos ficaram praticamente empatados como candidatos ao campo TAG.")
-    return medidos[0][1]
+    campo = rotulos[0].locator("xpath=following::input[1]")
+    if campo.count() != 1 or not campo.is_visible() or not campo.is_enabled():
+        raise pf.PortalFlowError(
+            "O campo associado estruturalmente a 'Tag (Opcional)' não ficou disponível de forma única."
+        )
+    return campo
 
 
-def _preencher_tag(page: Page, tag: str) -> None:
+def _preencher_tag(page: Page, tag: str, timeout_ms: int = 5_000) -> None:
     campo = _campo_tag(page)
     campo.fill(tag)
     campo.press("Tab")
-    page.wait_for_timeout(250)
-    recebido = campo.input_value().strip()
-    if recebido != tag:
-        raise pf.PortalFlowError(
-            f"TAG divergente após preenchimento: esperado {tag!r}, recebido {recebido!r}."
-        )
+
+    # Angular pode reconstruir o trecho da tela no blur. Por isso NÃO reutilizamos
+    # o Locator anterior para validar. Relocalizamos o campo do zero a cada leitura.
+    limite = time.monotonic() + timeout_ms / 1000
+    ultimo_valor = ""
+    while time.monotonic() < limite:
+        campo_atual = _campo_tag(page)
+        try:
+            ultimo_valor = campo_atual.input_value().strip()
+        except Exception:
+            page.wait_for_timeout(100)
+            continue
+        if ultimo_valor == tag:
+            return
+        page.wait_for_timeout(150)
+
+    raise pf.PortalFlowError(
+        f"TAG divergente após preenchimento: esperado {tag!r}, recebido {ultimo_valor!r}. "
+        "O campo foi relocalizado estruturalmente após o rerender."
+    )
 
 
 def executar_fase4(
@@ -199,8 +202,6 @@ def executar_fase4(
     _aguardar_texto(page, "Selecionar Débitos Consignado")
 
     log("[3/6] Tela de consignado carregada. Nenhuma seleção será alterada.")
-    # Conforme regra do processo, os débitos consignados já vêm selecionados
-    # automaticamente de acordo com os CPFs escolhidos no FGTS.
     page.wait_for_timeout(500)
 
     log("[4/6] Avançando sem alterar consignado para Definir Vencimento...")
