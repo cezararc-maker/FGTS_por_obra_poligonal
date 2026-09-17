@@ -89,25 +89,33 @@ def _caixa(locator: Locator) -> dict | None:
 
 
 def _checkboxes_grade(page: Page) -> tuple[Locator, list[Locator]]:
-    """Identifica o checkbox geral e os checkboxes de linhas pela geometria da grade.
+    """Identifica o checkbox mestre e os checkboxes das linhas da grade.
 
-    A grade do FGTS Digital não é uma <table> HTML tradicional. Usamos o cabeçalho
-    'Competência de Apuração' como referência visual. O checkbox geral fica à
-    esquerda e alinhado verticalmente ao cabeçalho; os checkboxes das linhas ficam
-    abaixo dele, praticamente na mesma coluna X.
+    Evidência observada no portal: o checkbox mestre fica no canto superior esquerdo
+    do cabeçalho da grade, na mesma coluna X dos checkboxes dos colaboradores.
+    O DOM não expõe uma tabela HTML tradicional, então delimitamos a coluna visual
+    usando o cabeçalho 'Competência de Apuração' e ordenamos os checkboxes por Y.
     """
     cabecalhos = pf._visiveis(page.get_by_text("Competência de Apuração", exact=False))
     if not cabecalhos:
         raise pf.PortalFlowError("Cabeçalho 'Competência de Apuração' não foi localizado na grade de resultados.")
 
-    # Preferimos o cabeçalho que estiver mais próximo da região dos resultados.
-    referencia = cabecalhos[-1]
+    # Escolhe o cabeçalho visível mais baixo, que corresponde à grade de resultados.
+    referencias: list[tuple[float, Locator]] = []
+    for item in cabecalhos:
+        caixa = _caixa(item)
+        if caixa:
+            referencias.append((caixa["y"], item))
+    if not referencias:
+        raise pf.PortalFlowError("Não foi possível medir o cabeçalho da grade de resultados.")
+    referencias.sort(key=lambda item: item[0], reverse=True)
+    referencia = referencias[0][1]
     caixa_ref = _caixa(referencia)
     if not caixa_ref:
         raise pf.PortalFlowError("Não foi possível medir o cabeçalho da grade de resultados.")
 
     ref_x = caixa_ref["x"]
-    ref_y = caixa_ref["y"] + caixa_ref["height"] / 2
+    ref_top = caixa_ref["y"]
 
     candidatos: list[tuple[float, float, Locator]] = []
     for checkbox in pf._visiveis(page.get_by_role("checkbox")):
@@ -117,35 +125,38 @@ def _checkboxes_grade(page: Page) -> tuple[Locator, list[Locator]]:
         cx = caixa["x"] + caixa["width"] / 2
         cy = caixa["y"] + caixa["height"] / 2
 
-        # Checkbox da grade deve estar à esquerda do cabeçalho de competência.
+        # A coluna de seleção fica claramente à esquerda do primeiro cabeçalho textual.
         if cx >= ref_x:
+            continue
+        # Ignora filtros e checkboxes de seções anteriores da página.
+        if cy < ref_top - 45:
             continue
 
         candidatos.append((cx, cy, checkbox))
 
-    if not candidatos:
-        raise pf.PortalFlowError("Nenhum checkbox compatível com a grade de débitos foi localizado.")
-
-    # O geral é o checkbox à esquerda cujo centro está mais alinhado ao cabeçalho.
-    candidatos.sort(key=lambda item: abs(item[1] - ref_y))
-    geral_x, geral_y, geral = candidatos[0]
-
-    # Exigimos alinhamento vertical razoável para não confundir com filtros acima.
-    if abs(geral_y - ref_y) > 70:
+    if len(candidatos) < 2:
         raise pf.PortalFlowError(
-            "O checkbox mais próximo do cabeçalho não está alinhado com a grade; a automação parou para evitar seleção incorreta."
+            "Não foi possível identificar a coluna de checkboxes da grade (mestre + linhas)."
         )
 
-    linhas: list[Locator] = []
-    for cx, cy, checkbox in candidatos[1:]:
-        if cy <= geral_y + 15:
-            continue
-        if abs(cx - geral_x) > 35:
-            continue
-        linhas.append(checkbox)
+    # Primeiro encontramos a coluna X predominante à esquerda da grade.
+    candidatos.sort(key=lambda item: item[0])
+    menor_x = candidatos[0][0]
+    coluna = [item for item in candidatos if abs(item[0] - menor_x) <= 35]
+    if len(coluna) < 2:
+        raise pf.PortalFlowError(
+            "A coluna esquerda de checkboxes da grade não pôde ser confirmada com segurança."
+        )
+
+    # Na coluna correta, o checkbox mestre é o primeiro de cima para baixo.
+    coluna.sort(key=lambda item: item[1])
+    geral_x, geral_y, geral = coluna[0]
+    linhas = [checkbox for _, cy, checkbox in coluna[1:] if cy > geral_y + 20]
 
     if not linhas:
-        raise pf.PortalFlowError("Os checkboxes das linhas da grade não foram identificados abaixo do checkbox geral.")
+        raise pf.PortalFlowError(
+            "O checkbox mestre foi localizado, mas os checkboxes dos colaboradores não foram encontrados abaixo dele."
+        )
 
     return geral, linhas
 
@@ -176,7 +187,6 @@ def _marcar_e_validar_grade(page: Page) -> int:
         try:
             geral_marcado = geral.is_checked()
         except Exception:
-            # A grade pode rerenderizar após a seleção; relocalizamos.
             geral, linhas = _checkboxes_grade(page)
             geral_marcado = geral.is_checked()
 
@@ -193,7 +203,7 @@ def _marcar_e_validar_grade(page: Page) -> int:
         page.wait_for_timeout(150)
 
     raise pf.PortalFlowError(
-        "O clique no checkbox geral não resultou em seleção comprovada das linhas da grade. "
+        "O checkbox mestre da grade foi acionado, mas a seleção dos colaboradores não foi comprovada. "
         "A automação parou antes de procurar 'Adicionar à guia'."
     )
 
@@ -297,7 +307,7 @@ def executar_fase3(
         f"{total_itens if total_itens is not None else 'não identificado'}."
     )
 
-    log("[9/10] Marcando o checkbox geral e comprovando a seleção das linhas...")
+    log("[9/10] Marcando o checkbox mestre do cabeçalho e comprovando a seleção das linhas...")
     linhas_marcadas = _marcar_e_validar_grade(page)
     log(f"Seleção da grade confirmada: {linhas_marcadas} linha(s) visível(is) marcada(s).")
 
