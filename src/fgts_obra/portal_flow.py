@@ -226,47 +226,78 @@ def _mais_proximo(referencia: Locator, candidatos: list[Locator], descricao: str
     return medidos[0][1]
 
 
-def _campo_estabelecimento(page: Page) -> Locator:
-    """Localiza o campo visualmente ligado a 'Estabelecimento da Remuneração'.
-
-    O DOM agrupa os três blocos da linha em um contêiner comum. Por isso, usamos
-    o título visível como âncora e escolhemos o campo de inscrição mais próximo,
-    sem coordenadas absolutas e sem depender da largura da tela.
-    """
-    titulo = _unico_visivel(
+def _titulo_estabelecimento(page: Page) -> Locator:
+    return _unico_visivel(
         page.get_by_text("Estabelecimento da Remuneração", exact=True),
         "Estabelecimento da Remuneração",
     )
 
-    campos = _visiveis(page.locator("input[placeholder='Informe CNPJ, CAEPF ou CNO']"))
-    if not campos:
-        campos = _visiveis(page.locator("input[placeholder*='CNPJ'][placeholder*='CAEPF'][placeholder*='CNO']"))
 
-    campo = _mais_proximo(titulo, campos, "campo de Estabelecimento da Remuneração")
+def _selecionar_tipo_estabelecimento(page: Page, tipo: str) -> Locator:
+    """Seleciona CNPJ/CNO no bloco correto antes de procurar o campo.
+
+    O campo de inscrição só é habilitado/exibido depois da escolha do tipo.
+    Como existem CNPJ/CNO em outros blocos, usamos o título de Estabelecimento
+    da Remuneração como âncora visual e escolhemos a opção mais próxima dele.
+    """
+    titulo = _titulo_estabelecimento(page)
+    opcoes = _visiveis(page.get_by_text(tipo, exact=True))
+    opcao = _mais_proximo(
+        titulo,
+        opcoes,
+        f"opção {tipo} de Estabelecimento da Remuneração",
+    )
 
     tx, ty = _centro(titulo)
-    cx, cy = _centro(campo)
-    if cy <= ty:
-        raise PortalFlowError("O campo escolhido para Estabelecimento da Remuneração não está abaixo do título esperado.")
-    return campo
+    ox, oy = _centro(opcao)
+    if oy <= ty:
+        raise PortalFlowError(
+            f"A opção {tipo} selecionada não está abaixo do título 'Estabelecimento da Remuneração'."
+        )
+
+    opcao.click()
+    page.wait_for_timeout(250)
+    return titulo
+
+
+def _aguardar_campo_estabelecimento(page: Page, titulo: Locator) -> Locator:
+    """Aguarda o campo que surge após escolher CNPJ/CNO e o associa ao bloco correto."""
+    limite = time.monotonic() + 5
+    while time.monotonic() < limite:
+        campos = _visiveis(
+            page.locator(
+                "input:enabled[placeholder*='CNPJ'][placeholder*='CNO']"
+            )
+        )
+        if not campos:
+            campos = _visiveis(
+                page.locator(
+                    "input:enabled[placeholder='Informe CNPJ, CAEPF ou CNO']"
+                )
+            )
+
+        if campos:
+            campo = _mais_proximo(
+                titulo,
+                campos,
+                "campo habilitado de Estabelecimento da Remuneração",
+            )
+            tx, ty = _centro(titulo)
+            cx, cy = _centro(campo)
+            if cy > ty:
+                return campo
+
+        page.wait_for_timeout(150)
+
+    raise PortalFlowError(
+        "Após selecionar o tipo de inscrição, o campo habilitado de 'Estabelecimento da Remuneração' "
+        "não apareceu em até 5 segundos."
+    )
 
 
 def _selecionar_tipo_e_campo(page: Page, tipo: str) -> Locator:
-    campo = _campo_estabelecimento(page)
-
-    opcoes_tipo = _visiveis(page.get_by_text(tipo, exact=True))
-    tipo_texto = _mais_proximo(campo, opcoes_tipo, f"tipo de inscrição {tipo} do Estabelecimento da Remuneração")
-
-    tx, ty = _centro(tipo_texto)
-    cx, cy = _centro(campo)
-    if ty >= cy:
-        raise PortalFlowError(
-            f"A opção {tipo} escolhida não está acima do campo de Estabelecimento da Remuneração."
-        )
-
-    tipo_texto.click()
-    page.wait_for_timeout(150)
-    return campo
+    titulo = _selecionar_tipo_estabelecimento(page, tipo)
+    return _aguardar_campo_estabelecimento(page, titulo)
 
 
 def _localizar_tabela_resultado(page: Page) -> Locator | None:
@@ -327,7 +358,10 @@ def executar_pesquisa_segura(
     log("[6/8] Abrindo Pesquisa Expandida...")
     _expandir_pesquisa(page)
 
-    log(f"[7/8] Selecionando {tipo_inscricao} em Estabelecimento da Remuneração e preenchendo a inscrição...")
+    log(
+        f"[7/8] Selecionando {tipo_inscricao} em Estabelecimento da Remuneração, "
+        "aguardando o campo e preenchendo a inscrição..."
+    )
     campo = _selecionar_tipo_e_campo(page, tipo_inscricao)
     campo.fill(inscricao)
     campo.press("Tab")
