@@ -9,7 +9,12 @@ from .app import AppFGTS
 from .batch_state import salvar_status, status_atual
 from .browser_connection import BrowserSession
 from .phase5_flow import DownloadRelatorioTimeout, _reiniciar
-from .phase6_flow import achatar_downloads, executar_item_lote
+from .phase6_flow import (
+    achatar_downloads,
+    consolidar_downloads,
+    executar_item_lote,
+    gerar_zip_competencia,
+)
 from .portal_flow import salvar_screenshot_erro
 
 
@@ -35,6 +40,13 @@ class AppFGTSFase6(AppFGTS):
             state="disabled",
         )
         self.btn_parar.pack(side="left", padx=8)
+
+        self.btn_zip = ttk.Button(
+            self.btn_fase2.master,
+            text="Gerar ZIP da competência",
+            command=self._gerar_zip_manual,
+        )
+        self.btn_zip.pack(side="left", padx=8)
 
     def _itens_selecionados(self):
         if self.resultado is None:
@@ -88,6 +100,40 @@ class AppFGTSFase6(AppFGTS):
 
         self.after(0, mostrar)
 
+    def _preparar_e_gerar_zip(self) -> Path:
+        if self.resultado is None or not self.resultado.valida:
+            raise RuntimeError("Nenhuma planilha válida está carregada.")
+
+        competencia = self.resultado.competencia
+        # Migra para Downloads quaisquer arquivos de testes/versões anteriores que
+        # ainda estejam no diretório temporário do projeto, usando a TAG da planilha.
+        for item in self.resultado.itens:
+            consolidar_downloads(competencia, item.inscricao, item.tag)
+
+        return gerar_zip_competencia(competencia)
+
+    def _gerar_zip_manual(self) -> None:
+        if self._executando:
+            messagebox.showwarning("ZIP", "Aguarde o lote atual terminar antes de gerar o ZIP.")
+            return
+        if self.resultado is None or not self.resultado.valida:
+            messagebox.showwarning("ZIP", "Selecione e valide a planilha da competência primeiro.")
+            return
+
+        try:
+            caminho = self._preparar_e_gerar_zip()
+        except Exception as exc:
+            messagebox.showerror("Erro ao gerar ZIP", str(exc))
+            self._registrar(f"ZIP NÃO GERADO: {exc}")
+            return
+
+        self._registrar(f"ZIP da competência criado: {caminho}")
+        messagebox.showinfo(
+            "ZIP da competência",
+            f"Arquivo criado com sucesso:\n\n{caminho}\n\n"
+            "O ZIP contém as pastas das TAGs e seus respectivos PDFs.",
+        )
+
     def _iniciar_lote(self) -> None:
         if self._executando:
             return
@@ -138,6 +184,7 @@ class AppFGTSFase6(AppFGTS):
         self.btn_parar.configure(state="normal")
         self.btn_chrome.configure(state="disabled")
         self.btn_preparar.configure(state="disabled")
+        self.btn_zip.configure(state="disabled")
 
         thread = threading.Thread(target=self._worker_lote, args=(pendentes,), daemon=True)
         thread.start()
@@ -148,6 +195,8 @@ class AppFGTSFase6(AppFGTS):
         pendencias = 0
         erros = 0
         interrompido = False
+        zip_criado: Path | None = None
+        zip_erro: str | None = None
 
         try:
             self._log_worker("FASE 6 INICIADA — conectando ao Chrome dedicado...")
@@ -246,6 +295,17 @@ class AppFGTSFase6(AppFGTS):
             except Exception:
                 pass
 
+            # Só gera automaticamente o pacote para envio quando o lote terminou limpo.
+            # Se houver erro, pendência ou parada do operador, as pastas permanecem
+            # disponíveis e o ZIP pode ser criado depois pelo botão manual.
+            if not interrompido and erros == 0 and pendencias == 0:
+                try:
+                    zip_criado = self._preparar_e_gerar_zip()
+                    self._log_worker(f"ZIP da competência criado: {zip_criado}")
+                except Exception as exc:
+                    zip_erro = str(exc)
+                    self._log_worker(f"ZIP NÃO GERADO: {zip_erro}")
+
             checkpoint = (
                 Path.home()
                 / "Downloads"
@@ -260,8 +320,13 @@ class AppFGTSFase6(AppFGTS):
                 f"Erros: {erros}\n\n"
                 f"Checkpoint: {checkpoint}"
             )
+            if zip_criado:
+                resumo += f"\n\nZIP para envio: {zip_criado}"
+            elif zip_erro:
+                resumo += f"\n\nAtenção: o lote terminou, mas o ZIP não foi criado: {zip_erro}"
+
             self._log_worker(resumo.replace("\n", " | "))
-            self._mostrar_worker("info" if not erros else "aviso", "Resumo do lote", resumo)
+            self._mostrar_worker("info" if not erros and not zip_erro else "aviso", "Resumo do lote", resumo)
 
             def liberar() -> None:
                 self._executando = False
@@ -269,6 +334,7 @@ class AppFGTSFase6(AppFGTS):
                 self.btn_parar.configure(state="disabled")
                 self.btn_chrome.configure(state="normal")
                 self.btn_preparar.configure(state="normal")
+                self.btn_zip.configure(state="normal")
 
             self.after(0, liberar)
 
