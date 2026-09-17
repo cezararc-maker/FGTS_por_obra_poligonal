@@ -261,37 +261,32 @@ def _selecionar_tipo_estabelecimento(page: Page, tipo: str) -> Locator:
 
 
 def _aguardar_campo_estabelecimento(page: Page, titulo: Locator) -> Locator:
-    """Aguarda o campo que surge após escolher CNPJ/CNO e o associa ao bloco correto."""
+    """Aguarda o input real do Estabelecimento da Remuneração após escolher CNPJ/CNO."""
+    seletor = "input[name='nrEstabelecimentoRemuneracao']"
     limite = time.monotonic() + 5
-    while time.monotonic() < limite:
-        campos = _visiveis(
-            page.locator(
-                "input:enabled[placeholder*='CNPJ'][placeholder*='CNO']"
-            )
-        )
-        if not campos:
-            campos = _visiveis(
-                page.locator(
-                    "input:enabled[placeholder='Informe CNPJ, CAEPF ou CNO']"
-                )
-            )
 
-        if campos:
-            campo = _mais_proximo(
-                titulo,
-                campos,
-                "campo habilitado de Estabelecimento da Remuneração",
+    while time.monotonic() < limite:
+        campos = _visiveis(page.locator(seletor))
+        if len(campos) == 1:
+            campo = campos[0]
+            try:
+                if campo.is_enabled():
+                    tx, ty = _centro(titulo)
+                    cx, cy = _centro(campo)
+                    if cy > ty:
+                        return campo
+            except Exception:
+                pass
+        elif len(campos) > 1:
+            raise PortalFlowError(
+                "Mais de um input com name='nrEstabelecimentoRemuneracao' ficou visível; a automação parou."
             )
-            tx, ty = _centro(titulo)
-            cx, cy = _centro(campo)
-            if cy > ty:
-                return campo
 
         page.wait_for_timeout(150)
 
     raise PortalFlowError(
-        "Após selecionar o tipo de inscrição, o campo habilitado de 'Estabelecimento da Remuneração' "
-        "não apareceu em até 5 segundos."
+        "Após selecionar o tipo de inscrição, o campo name='nrEstabelecimentoRemuneracao' "
+        "não apareceu habilitado em até 5 segundos."
     )
 
 
