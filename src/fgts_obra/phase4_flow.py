@@ -54,31 +54,71 @@ def _botao_avancar(page: Page) -> Locator:
 
 
 def _extrair_datas_visiveis(page: Page) -> list[str]:
-    texto = _texto_pagina(page)
-    return re.findall(r"\b\d{2}/\d{2}/\d{4}\b", texto)
+    datas: list[str] = []
+
+    try:
+        texto = _texto_pagina(page)
+        datas.extend(re.findall(r"\b\d{2}/\d{2}/\d{4}\b", texto))
+    except Exception:
+        pass
+
+    # Alguns componentes do portal mantêm a data somente no value do input,
+    # sem incluí-la imediatamente no innerText da página.
+    try:
+        inputs = pf._visiveis(page.locator("input"))
+        for campo in inputs:
+            try:
+                valor = campo.input_value().strip()
+            except Exception:
+                continue
+            datas.extend(re.findall(r"\b\d{2}/\d{2}/\d{4}\b", valor))
+    except Exception:
+        pass
+
+    # Preserva a ordem e remove duplicidades.
+    return list(dict.fromkeys(datas))
 
 
-def _validar_vencimento(page: Page, vencimento: date) -> str:
+def _validar_vencimento(page: Page, vencimento: date, timeout_ms: int = 60_000) -> str:
+    """Aguarda a etapa Definir Vencimento terminar de carregar e valida a data.
+
+    Essa tela pode levar mais tempo que as anteriores. Enquanto os totais são
+    calculados, o campo 'Vencimento da Guia' pode permanecer vazio. Por isso a
+    validação é baseada em estado real, e não em uma pausa fixa.
+    """
     esperado = vencimento.strftime("%d/%m/%Y")
-    datas = _extrair_datas_visiveis(page)
-    if esperado in datas:
-        return esperado
-    if esperado in _texto_pagina(page):
-        return esperado
+    limite = time.monotonic() + timeout_ms / 1000
+    ultimas_datas: list[str] = []
+
+    while time.monotonic() < limite:
+        datas = _extrair_datas_visiveis(page)
+        if datas:
+            ultimas_datas = datas
+        if esperado in datas:
+            return esperado
+
+        # Fallback adicional para componentes que renderizam o valor fora de input.
+        if esperado in _texto_pagina(page):
+            return esperado
+
+        page.wait_for_timeout(300)
+
     raise pf.PortalFlowError(
-        f"Vencimento divergente ou não localizado na etapa 'Definir Vencimento': esperado {esperado}. "
-        f"Datas visíveis encontradas: {', '.join(datas) if datas else 'nenhuma'}."
+        "A etapa 'Definir Vencimento' não terminou de carregar com o vencimento esperado "
+        f"em até {timeout_ms // 1000} segundos: esperado {esperado}. "
+        f"Datas encontradas durante a espera: {', '.join(ultimas_datas) if ultimas_datas else 'nenhuma'}."
     )
 
 
 def _campo_tag(page: Page) -> Locator:
-    # Primeiro tenta associação semântica direta.
-    candidatos = pf._visiveis(page.get_by_label(re.compile(r"^TAG$", re.IGNORECASE)))
+    # Primeiro tenta associação semântica direta. O portal usa 'Tag (Opcional)',
+    # portanto não exigimos igualdade exata com 'TAG'.
+    candidatos = pf._visiveis(page.get_by_label(re.compile(r"tag", re.IGNORECASE)))
     campos = [item for item in candidatos if item.evaluate("el => ['INPUT','TEXTAREA'].includes(el.tagName)")]
     if len(campos) == 1:
         return campos[0]
     if len(campos) > 1:
-        raise pf.PortalFlowError("Mais de um campo associado ao rótulo 'TAG' foi encontrado.")
+        raise pf.PortalFlowError("Mais de um campo associado ao rótulo TAG foi encontrado.")
 
     # Depois tenta atributos estáveis contendo 'tag'.
     candidatos = pf._visiveis(
@@ -93,10 +133,10 @@ def _campo_tag(page: Page) -> Locator:
     if len(candidatos) > 1:
         raise pf.PortalFlowError("Mais de um campo candidato para TAG foi encontrado na tela.")
 
-    # Fallback controlado: procura o texto TAG e o primeiro input/textarea visível próximo.
-    rotulos = pf._visiveis(page.get_by_text(re.compile(r"^TAG$", re.IGNORECASE)))
+    # Fallback controlado: procura o texto 'Tag (Opcional)' e o campo visível mais próximo.
+    rotulos = pf._visiveis(page.get_by_text(re.compile(r"^Tag(?:\s*\(Opcional\))?$", re.IGNORECASE)))
     if len(rotulos) != 1:
-        raise pf.PortalFlowError("O rótulo 'TAG' não foi localizado de forma única na etapa Definir Vencimento.")
+        raise pf.PortalFlowError("O rótulo TAG não foi localizado de forma única na etapa Definir Vencimento.")
 
     rotulo = rotulos[0]
     rx, ry = pf._centro(rotulo)
@@ -107,7 +147,6 @@ def _campo_tag(page: Page) -> Locator:
             cx, cy = pf._centro(campo)
         except Exception:
             continue
-        # Campo associado deve estar na mesma região vertical ou logo abaixo do rótulo.
         if cy < ry - 20:
             continue
         distancia = ((cx - rx) ** 2 + (cy - ry) ** 2) ** 0.5
@@ -169,8 +208,8 @@ def executar_fase4(
     avancar.click()
     _aguardar_texto(page, "Definir Vencimento")
 
-    log("[5/6] Validando vencimento exibido pelo portal...")
-    venc_portal = _validar_vencimento(page, vencimento)
+    log("[5/6] Aguardando o carregamento da etapa e validando o vencimento do portal...")
+    venc_portal = _validar_vencimento(page, vencimento, timeout_ms=60_000)
 
     log(f"[6/6] Preenchendo TAG da planilha: {tag!r}...")
     _preencher_tag(page, tag)
