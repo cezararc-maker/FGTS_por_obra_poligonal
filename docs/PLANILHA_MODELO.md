@@ -50,9 +50,11 @@ Recomendação para o layout definitivo: adicionar uma coluna própria, por exem
 
 ```text
 TIPO INSCRICAO | DOCUMENTO
-CNPJ           | 03492162000182
-CNO            | 900144852472
+CNPJ           | 00123456000199
+CNO            | 900000000000
 ```
+
+Os números acima são fictícios e servem apenas para documentar o formato.
 
 Valores aceitos inicialmente: `CNPJ` e `CNO`.
 
@@ -60,7 +62,7 @@ Isso permite selecionar diretamente a opção correta no FGTS Digital e validar 
 
 ## Ponto crítico — CNPJ com zero inicial
 
-O primeiro CNPJ é exibido no Excel como `03492162000182`, mas o valor subjacente foi lido numericamente como `3492162000182`.
+No modelo recebido existe CNPJ iniciado por zero. Visualmente o Excel preserva todos os dígitos, porém o valor subjacente é numérico e a leitura bruta perde o zero inicial.
 
 Portanto, a automação não pode converter a coluna `Documento` ingenuamente para número/string e confiar no resultado. O zero inicial do CNPJ precisa ser preservado.
 
