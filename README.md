@@ -1,8 +1,8 @@
 # FGTS por Obra / Poligonal
 
-Automação assistida em Python para preparação e, futuramente, emissão controlada de Guias Parametrizadas no FGTS Digital por inscrição/obra.
+Automação assistida em Python para preparação e emissão controlada de Guias Parametrizadas no FGTS Digital por inscrição/obra.
 
-> Estado atual: **Modo TESTE — Fase 1**. Nesta fase o programa **não navega no portal, não clica em Emitir Guia e não baixa documentos**. Ele valida a planilha, calcula/confronta o vencimento, prepara uma única inscrição para teste e comprova a conexão somente leitura com um Chrome visível dedicado.
+> Estado atual: **Modo TESTE — Fase 2**. Nesta fase o programa pode navegar até `Gestão de Guias > Emissão de Guia Parametrizada`, preencher competência e filtros, pesquisar **uma única inscrição** e parar no resultado. Ele **não seleciona débitos, não clica em Adicionar à guia, não avança para consignado e não emite guia**.
 
 ## Princípios do projeto
 
@@ -10,159 +10,141 @@ Automação assistida em Python para preparação e, futuramente, emissão contr
 - Navegador sempre visível durante a execução.
 - A sessão do FGTS Digital deve estar previamente autenticada pelo usuário.
 - O projeto não obtém, armazena ou manipula senhas ou certificados digitais.
-- Pausas configuráveis entre etapas.
-- Controle de **Pausar**, **Retomar** e **Abortar** nas fases que executarem ações no portal.
-- Em erro ou estado inesperado, a execução deve parar com identificação da inscrição, obra e etapa.
-- Retomada somente após revalidação do estado da tela; nunca continuar às cegas após intervenção manual.
-- Logs estruturados e captura de evidência em falhas.
-- Dados reais, PDFs, planilhas operacionais, screenshots com informações sensíveis e logs de execução não devem ser versionados.
+- Em estado inesperado, a execução para em vez de clicar por aproximação.
+- Dados reais, PDFs, planilhas operacionais, screenshots e logs locais não são versionados.
 
-## Requisitos da Fase 1
+## Requisitos
 
 - Windows 10 ou 11;
 - Python 3.11;
 - Google Chrome;
 - Git;
-- acesso ao portal FGTS Digital realizado manualmente pelo operador.
+- acesso ao FGTS Digital realizado manualmente pelo operador.
 
-## Branch de teste
+## Branch da Fase 2
 
 ```text
-feat/modo-teste-fase1
+feat/modo-teste-fase2
 ```
 
-## 1. Obter o projeto
-
-Se ainda não tiver o repositório no computador:
+Se o repositório já está no computador:
 
 ```powershell
-git clone https://github.com/cezararc-maker/FGTS_por_obra_poligonal.git
-cd FGTS_por_obra_poligonal
-git checkout feat/modo-teste-fase1
-```
-
-Se já tiver o repositório:
-
-```powershell
-cd CAMINHO\FGTS_por_obra_poligonal
+cd "C:\Users\Cezar.CONTALEX\Desktop\GitHub\FGTS_por_obra_poligonal"
 git fetch origin
-git checkout feat/modo-teste-fase1
-git pull origin feat/modo-teste-fase1
+git checkout feat/modo-teste-fase2
+git pull origin feat/modo-teste-fase2
 ```
 
-## 2. Instalar o ambiente de teste
+O ambiente `.venv` criado na Fase 1 pode ser reutilizado. Se necessário, execute novamente:
 
-No Explorer, execute:
-
-```text
-scripts\instalar_teste.bat
+```powershell
+.\scripts\instalar_teste.bat
 ```
 
-Ele cria `.venv`, atualiza o `pip` e instala o projeto localmente.
+## Abrir o Chrome dedicado
 
-## 3. Abrir o Chrome dedicado
+Execute em um PowerShell separado:
 
-Execute:
-
-```text
-scripts\abrir_chrome_teste.bat
+```powershell
+cd "C:\Users\Cezar.CONTALEX\Desktop\GitHub\FGTS_por_obra_poligonal"
+.\scripts\abrir_chrome_teste.bat
 ```
-
-Esse Chrome usa um perfil dedicado em `%LOCALAPPDATA%\FGTS_Poligonal\ChromeProfile` e habilita depuração remota somente para que o Python se conecte à janela visível.
-
-O BAT **não abre uma URL específica e não realiza login**.
 
 No Chrome que abrir:
 
 1. acesse o FGTS Digital manualmente;
 2. faça autenticação/certificado manualmente;
 3. assuma a procuração/empresa manualmente;
-4. deixe o navegador aberto na tela desejada.
+4. deixe a sessão aberta.
 
-## 4. Abrir a aplicação de teste
+## Abrir a aplicação
 
-Execute:
+Em outro PowerShell:
 
-```text
-scripts\executar_teste.bat
+```powershell
+cd "C:\Users\Cezar.CONTALEX\Desktop\GitHub\FGTS_por_obra_poligonal"
+.\scripts\executar_teste.bat
 ```
 
-Na interface:
+Na aplicação:
 
-1. clique em `Selecionar Excel`;
-2. selecione a planilha atualizada;
-3. aguarde a validação;
-4. confira competência, vencimento e quantidade de inscrições;
-5. escolha uma única inscrição na tabela;
-6. clique em `Preparar teste de 1 inscrição`;
-7. confira o resumo;
-8. com o Chrome dedicado aberto e autenticado, clique em `Testar conexão com Chrome`.
+1. selecione a planilha;
+2. confirme competência, vencimento e os 26 registros;
+3. escolha **uma única inscrição**;
+4. opcionalmente clique em `Preparar 1 inscrição` para revisar os dados;
+5. clique em `FASE 2 — Pesquisar inscrição`;
+6. leia a confirmação e só prossiga se a inscrição selecionada estiver correta;
+7. acompanhe o Chrome visível e o log.
 
-### Resultado esperado com a planilha atual
+## O que a Fase 2 pode fazer
 
-Para competência `08/2026`:
+A execução autorizada nesta fase é limitada a:
+
+1. validar que a página ativa pertence ao FGTS Digital;
+2. abrir `Gestão de Guias`;
+3. abrir `Emissão de Guia Parametrizada`;
+4. confirmar a etapa `Selecionar Débitos FGTS`;
+5. preencher `Inicial` e `Final` com a competência da planilha;
+6. conferir e desmarcar `Vencido`;
+7. abrir `Pesquisa Expandida`;
+8. trabalhar somente no contexto `Estabelecimento da Remuneração`;
+9. selecionar `CNPJ` ou `CNO` conforme a planilha;
+10. preencher a inscrição;
+11. clicar em `Pesquisar`;
+12. localizar a tabela de resultado e confirmar a inscrição;
+13. **parar imediatamente**.
+
+## Bloqueios obrigatórios da Fase 2
+
+Não existe código nesta fase para:
+
+- selecionar o checkbox dos débitos;
+- `Adicionar à guia`;
+- `Avançar`;
+- tratar consignado;
+- definir vencimento/TAG no portal;
+- `Emitir Guia`;
+- baixar PDF/CSV.
+
+## Comportamento em erro
+
+Se um elemento não puder ser identificado de forma única ou a página não atingir a pós-condição esperada, a automação para.
+
+Quando possível, uma captura local é salva em:
 
 ```text
-Vencimento calculado: 18/09/2026
+screenshots\fase2_erro_AAAAMMDD_HHMMSS.png
 ```
 
-A interface deve listar 26 registros válidos, sendo 1 CNPJ e 25 CNOs, desde que a planilha utilizada corresponda ao modelo validado no projeto.
+A pasta `screenshots` está no `.gitignore` e não é enviada ao repositório.
 
-## O que o teste de Chrome faz
+## Seletores da interface do portal
 
-A aplicação conecta ao Chrome em:
+A implementação usa como base os nomes acessíveis observados no mapeamento manual, entre eles:
 
-```text
-http://127.0.0.1:9222
-```
+- `Gestão de Guias`;
+- `Emissão de Guia Parametrizada`;
+- `Selecionar Débitos FGTS`;
+- `Inicial`;
+- `Final`;
+- `Vencido`;
+- `Expandir Pesquisa`;
+- `Ocultar Pesquisa Expandida`;
+- `Estabelecimento da Remuneração`;
+- `CNPJ` / `CNO`;
+- `Pesquisar`.
 
-Ela lê apenas:
-
-- quantidade de páginas abertas;
-- título da página atual;
-- URL da página atual.
-
-Nesta fase, **nenhum clique é executado pelo programa**.
+Esses seletores ainda estão sendo **validados por código no portal real**. Se algum deles divergir da estrutura atual, o teste deve parar e o seletor será ajustado com base no erro observado — não por adivinhação.
 
 ## Testes automatizados locais
-
-Após instalar o ambiente:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Os testes cobrem inicialmente:
-
-- vencimento de 08/2026 em 18/09/2026;
-- antecipação de fim de semana;
-- suporte a feriado informado explicitamente;
-- normalização de CNPJ com zero inicial;
-- formato de CNO com 12 dígitos;
-- leitura de uma planilha mínima válida.
-
-## Próxima fase
-
-Somente depois de validar esta Fase 1, a próxima implementação será o **Modo TESTE — Fase 2**:
-
-1. conectar ao Chrome visível;
-2. confirmar sessão/página esperada;
-3. navegar apenas até `Gestão de Guias > Emissão de Guia Parametrizada` usando seletores observados e testados;
-4. preencher uma única competência e uma única inscrição;
-5. pesquisar e validar o resultado;
-6. parar antes de adicionar/emitir qualquer guia enquanto ajustamos as guardas.
-
-A emissão definitiva continuará bloqueada até validação explícita do usuário.
+Os testes locais existentes cobrem as regras de planilha, normalização de inscrições e vencimento. O fluxo do portal depende do teste controlado no ambiente real.
 
 ## Segurança
 
-O repositório é público. Não versionar:
-
-- planilhas reais;
-- PDFs de guias;
-- CPF/CNPJ/CNO operacionais em exemplos;
-- screenshots com dados pessoais;
-- cookies/tokens;
-- certificado digital;
-- arquivos PFX/P12;
-- credenciais.
+O repositório é público. Não versionar planilhas reais, PDFs de guias, inscrições operacionais, screenshots com dados pessoais, cookies/tokens, certificado digital, arquivos PFX/P12 ou credenciais.
