@@ -36,7 +36,8 @@ class ResultadoFase5:
     inscricao: str
     competencia: str
     guia_emitida: bool
-    numero_guia: str
+    numero_guia: str | None
+    guia: ResultadoDownload
     fgts: ResultadoDownload
     consignado: ResultadoDownload
     reiniciado: bool
@@ -106,7 +107,6 @@ def _localizar_botao_emitir(page: Page) -> Locator | None:
 
 
 def _aguardar_etapa_emitir_guia(page: Page, timeout_ms: int = 90_000) -> None:
-    """Confirma que a etapa existe, sem reutilizar um locator antigo após rerenders."""
     limite = time.monotonic() + timeout_ms / 1000
     while time.monotonic() < limite:
         if _overlay_carregamento_visivel(page):
@@ -123,14 +123,6 @@ def _aguardar_etapa_emitir_guia(page: Page, timeout_ms: int = 90_000) -> None:
 
 
 def _clicar_emitir_guia_seguro(page: Page, timeout_ms: int = 90_000) -> None:
-    """Clica em Emitir Guia somente após estabilidade real do layout.
-
-    O FGTS Digital pode continuar recalculando a altura das tabelas mesmo sem overlay.
-    Por isso não guardamos um Locator entre a espera e o clique. A cada tentativa o
-    botão é relocalizado, centralizado no viewport e submetido a um click(trial=True),
-    que testa exatamente as mesmas condições de um clique real sem disparar a ação.
-    Somente após duas provas consecutivas de actionability executamos um único clique.
-    """
     limite = time.monotonic() + timeout_ms / 1000
     provas_consecutivas = 0
 
@@ -147,13 +139,8 @@ def _clicar_emitir_guia_seguro(page: Page, timeout_ms: int = 90_000) -> None:
             continue
 
         try:
-            # Centraliza explicitamente o botão. scroll_into_view_if_needed pode deixá-lo
-            # no limite inferior do viewport enquanto o Angular ainda altera o layout.
             botao.evaluate("el => el.scrollIntoView({block: 'center', inline: 'nearest', behavior: 'instant'})")
             page.wait_for_timeout(300)
-
-            # Trial usa as regras reais do Playwright (visível, estável, recebendo eventos,
-            # dentro do viewport) sem efetuar o clique.
             botao.click(trial=True, timeout=1_500)
             provas_consecutivas += 1
 
@@ -161,8 +148,6 @@ def _clicar_emitir_guia_seguro(page: Page, timeout_ms: int = 90_000) -> None:
                 page.wait_for_timeout(350)
                 continue
 
-            # Relocaliza novamente imediatamente antes do clique real para não reutilizar
-            # referência de um DOM que possa ter sido reconstruído.
             botao = _localizar_botao_emitir(page)
             if botao is None or _overlay_carregamento_visivel(page):
                 provas_consecutivas = 0
@@ -170,7 +155,6 @@ def _clicar_emitir_guia_seguro(page: Page, timeout_ms: int = 90_000) -> None:
 
             botao.click(timeout=5_000)
             return
-
         except PlaywrightTimeoutError:
             provas_consecutivas = 0
             page.wait_for_timeout(300)
@@ -184,31 +168,97 @@ def _clicar_emitir_guia_seguro(page: Page, timeout_ms: int = 90_000) -> None:
     )
 
 
+def _normalizar_numero_guia(texto: str) -> str | None:
+    texto = texto.replace("–", "-").replace("—", "-").replace("−", "-")
+    texto = re.sub(r"[\u200b-\u200d\ufeff\s]", "", texto)
+    match = re.fullmatch(r"\d{12,25}-\d{1,4}", texto)
+    return match.group(0) if match else None
+
+
 def _extrair_numero_guia(page: Page) -> str | None:
-    """Extrai dinamicamente o identificador da guia exibido ao lado da TAG."""
+    """Localiza o número dinâmico da guia, priorizando o link ao lado da TAG."""
+    try:
+        links = pf._visiveis(page.locator("a"))
+        encontrados: list[str] = []
+        for link in links:
+            try:
+                numero = _normalizar_numero_guia(link.inner_text())
+            except Exception:
+                continue
+            if numero:
+                encontrados.append(numero)
+        encontrados = list(dict.fromkeys(encontrados))
+        if len(encontrados) == 1:
+            return encontrados[0]
+    except Exception:
+        pass
+
     texto = _texto_pagina(page)
-    candidatos = re.findall(r"(?<!\d)(\d{12,25}-\d{1,4})(?!\d)", texto)
-    if not candidatos:
-        return None
-    unicos = list(dict.fromkeys(candidatos))
-    if len(unicos) == 1:
-        return unicos[0]
-    return None
+    texto = texto.replace("–", "-").replace("—", "-").replace("−", "-")
+    candidatos = re.findall(r"(?<!\d)(\d{12,25}\s*-\s*\d{1,4})(?!\d)", texto)
+    normalizados = []
+    for candidato in candidatos:
+        numero = _normalizar_numero_guia(candidato)
+        if numero:
+            normalizados.append(numero)
+    normalizados = list(dict.fromkeys(normalizados))
+    return normalizados[0] if len(normalizados) == 1 else None
 
 
-def _aguardar_emissao_confirmada(page: Page, timeout_ms: int = 90_000) -> str:
+def _reiniciar_visivel(page: Page) -> bool:
+    try:
+        return bool(pf._visiveis(page.get_by_role("button", name="Reiniciar", exact=True)))
+    except Exception:
+        return False
+
+
+def _aguardar_emissao_confirmada(
+    page: Page,
+    downloads_emitir: list[Download],
+    timeout_ms: int = 180_000,
+) -> tuple[str | None, Download | None]:
+    """Confirma a emissão por número da guia ou por prova alternativa forte.
+
+    Prova principal: número dinâmico da guia no link ao lado da TAG.
+    Prova alternativa: download automático da guia capturado + Reiniciar visível +
+    ausência de overlay por uma janela estável. Isso evita falso erro quando o link
+    textual demora a ser exposto no DOM embora a guia já tenha sido efetivamente gerada.
+    """
     limite = time.monotonic() + timeout_ms / 1000
+    inicio_alternativo: float | None = None
+
     while time.monotonic() < limite:
         if _overlay_carregamento_visivel(page):
+            inicio_alternativo = None
             page.wait_for_timeout(300)
             continue
+
         numero = _extrair_numero_guia(page)
+        download = downloads_emitir[0] if downloads_emitir else None
         if numero:
-            return numero
+            return numero, download
+
+        if download is not None and _reiniciar_visivel(page):
+            if inicio_alternativo is None:
+                inicio_alternativo = time.monotonic()
+            elif time.monotonic() - inicio_alternativo >= 2.0:
+                return None, download
+        else:
+            inicio_alternativo = None
+
         page.wait_for_timeout(400)
+
+    # Leitura final antes de declarar timeout, cobrindo conclusão exatamente no limite.
+    numero = _extrair_numero_guia(page)
+    download = downloads_emitir[0] if downloads_emitir else None
+    if numero:
+        return numero, download
+    if download is not None and _reiniciar_visivel(page) and not _overlay_carregamento_visivel(page):
+        return None, download
+
     raise pf.PortalFlowError(
-        "Após 'Emitir Guia', o portal não apresentou o número da guia em até 90 segundos. "
-        "A automação não assumirá que a emissão terminou apenas porque 'Reiniciar' apareceu."
+        "Após 'Emitir Guia', o portal não apresentou prova suficiente de conclusão em até 180 segundos: "
+        "nem número da guia identificável nem download automático da guia acompanhado do botão Reiniciar."
     )
 
 
@@ -273,9 +323,7 @@ def _controle_pdf_secao(page: Page, secao: str) -> Locator | None:
             chaves.add(chave)
             unicos.append(item)
 
-    if len(unicos) == 1:
-        return unicos[0]
-    return None
+    return unicos[0] if len(unicos) == 1 else None
 
 
 def _aguardar_controle_pdf(page: Page, secao: str, timeout_ms: int = 20_000) -> Locator | None:
@@ -299,7 +347,44 @@ def _pasta_downloads(competencia: str, inscricao: str) -> Path:
 
 def _nome_seguro(nome: str) -> str:
     nome = re.sub(r'[<>:"/\\|?*]', "_", nome).strip()
-    return nome or "relatorio.pdf"
+    return nome or "arquivo"
+
+
+def _arquivo_pdf(caminho: Path) -> bool:
+    try:
+        with caminho.open("rb") as arquivo:
+            return arquivo.read(5) == b"%PDF-"
+    except Exception:
+        return False
+
+
+def _salvar_guia_automatica(
+    download: Download | None,
+    competencia: str,
+    inscricao: str,
+    numero_guia: str | None,
+) -> ResultadoDownload:
+    if download is None:
+        return ResultadoDownload(tipo="GUIA", status="DOWNLOAD AUTOMÁTICO NÃO CAPTURADO", caminho=None)
+
+    pasta = _pasta_downloads(competencia, inscricao) / "GUIA"
+    pasta.mkdir(parents=True, exist_ok=True)
+    identificador = numero_guia or "NUMERO_NAO_IDENTIFICADO"
+    destino = pasta / f"GUIA_{_nome_seguro(identificador)}.pdf"
+
+    try:
+        download.save_as(str(destino))
+    except Exception as exc:
+        raise pf.PortalFlowError(f"A guia foi emitida, mas o download automático não pôde ser salvo: {exc}") from exc
+
+    if not destino.exists() or destino.stat().st_size <= 0:
+        raise pf.PortalFlowError("A guia foi emitida, mas o arquivo automático ficou vazio ou não foi encontrado.")
+    if not _arquivo_pdf(destino):
+        raise pf.PortalFlowError(
+            f"O download automático foi salvo em {destino}, mas o conteúdo não possui assinatura de PDF."
+        )
+
+    return ResultadoDownload(tipo="GUIA", status="CONCLUÍDO", caminho=str(destino))
 
 
 def _baixar_relatorio(page: Page, botao: Locator, tipo: str, competencia: str, inscricao: str) -> ResultadoDownload:
@@ -352,7 +437,7 @@ def executar_fase5(
     tag: str,
     log: LogFn,
 ) -> ResultadoFase5:
-    log("[1/7] Executando o fluxo validado até vencimento/TAG...")
+    log("[1/8] Executando o fluxo validado até vencimento/TAG...")
     executar_fase4(
         page,
         tipo_inscricao=tipo_inscricao,
@@ -363,26 +448,49 @@ def executar_fase5(
         log=log,
     )
 
-    log("[2/7] Aguardando 'Avançar' em Definir Vencimento...")
+    log("[2/8] Aguardando 'Avançar' em Definir Vencimento...")
     avancar = _aguardar_botao_habilitado(page, "Avançar", timeout_ms=60_000)
     avancar.click()
 
-    log("[3/7] Aguardando a etapa Emitir Guia ficar totalmente desbloqueada e estável...")
+    log("[3/8] Aguardando a etapa Emitir Guia ficar totalmente desbloqueada e estável...")
     _aguardar_etapa_emitir_guia(page, timeout_ms=90_000)
 
-    log("[4/7] Emitindo a guia com clique protegido por prova de estabilidade...")
-    _clicar_emitir_guia_seguro(page, timeout_ms=90_000)
+    downloads_emitir: list[Download] = []
 
-    log("[5/7] Aguardando a emissão REAL terminar e o número da guia aparecer...")
-    numero_guia = _aguardar_emissao_confirmada(page, timeout_ms=90_000)
-    log(f"Guia emitida confirmada pelo portal. Número da guia: {numero_guia}.")
+    def _capturar_download(download: Download) -> None:
+        downloads_emitir.append(download)
 
-    log("[6/7] Localizando e baixando o relatório PDF do FGTS...")
+    page.on("download", _capturar_download)
+    try:
+        log("[4/8] Emitindo a guia e monitorando o download automático...")
+        _clicar_emitir_guia_seguro(page, timeout_ms=90_000)
+
+        log("[5/8] Aguardando a emissão REAL terminar...")
+        numero_guia, download_guia = _aguardar_emissao_confirmada(
+            page,
+            downloads_emitir,
+            timeout_ms=180_000,
+        )
+    finally:
+        try:
+            page.remove_listener("download", _capturar_download)
+        except Exception:
+            pass
+
+    if numero_guia:
+        log(f"Guia emitida confirmada. Número da guia: {numero_guia}.")
+    else:
+        log("Guia emitida confirmada pelo download automático + estado final do portal; número ainda não identificado.")
+
+    log("[6/8] Salvando a própria guia emitida em pasta controlada...")
+    guia = _salvar_guia_automatica(download_guia, competencia, inscricao, numero_guia)
+    log(f"Guia: {guia.status} | {guia.caminho or '-'}")
+
+    log("[7/8] Localizando e baixando os relatórios PDF...")
     pdf_fgts = _aguardar_controle_pdf(page, "FGTS", timeout_ms=20_000)
     if pdf_fgts is None:
         raise pf.PortalFlowError(
-            "A guia foi emitida e o número da guia foi confirmado, mas o controle PDF da seção FGTS "
-            "não pôde ser identificado de forma determinística em até 20 segundos."
+            "A emissão foi confirmada, mas o controle PDF da seção FGTS não pôde ser identificado de forma determinística."
         )
     fgts = _baixar_relatorio(page, pdf_fgts, "FGTS", competencia, inscricao)
 
@@ -394,7 +502,7 @@ def executar_fase5(
     else:
         log("Consignado: nenhum controle PDF identificado; tratando como sem relatório de consignado.")
 
-    log("[7/7] Reiniciando o fluxo para deixar o portal pronto para a próxima guia...")
+    log("[8/8] Reiniciando o fluxo para deixar o portal pronto para a próxima guia...")
     _reiniciar(page)
 
     return ResultadoFase5(
@@ -403,6 +511,7 @@ def executar_fase5(
         competencia=competencia,
         guia_emitida=True,
         numero_guia=numero_guia,
+        guia=guia,
         fgts=fgts,
         consignado=consignado,
         reiniciado=True,
