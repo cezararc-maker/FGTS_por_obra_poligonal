@@ -10,7 +10,7 @@ from .batch_state import salvar_status, status_atual
 from .browser_connection import BrowserSession
 from .phase5_flow import DownloadRelatorioTimeout, _reiniciar
 from .phase6_flow import achatar_downloads, executar_item_lote
-from .portal_flow import PortalFlowError, salvar_screenshot_erro
+from .portal_flow import salvar_screenshot_erro
 
 
 class AppFGTSFase6(AppFGTS):
@@ -98,8 +98,7 @@ class AppFGTSFase6(AppFGTS):
         if not itens:
             messagebox.showwarning(
                 "Seleção do lote",
-                "Selecione as inscrições que ainda faltam usando Ctrl + clique.\n\n"
-                "Para o primeiro teste, selecione apenas 2 inscrições.",
+                "Selecione as inscrições que ainda faltam usando Ctrl + clique.",
             )
             return
 
@@ -111,7 +110,10 @@ class AppFGTSFase6(AppFGTS):
         pendentes = [item for item in itens if item not in ja_concluidos]
 
         if not pendentes:
-            messagebox.showinfo("Lote", "Todas as inscrições selecionadas já constam como CONCLUÍDAS no checkpoint local.")
+            messagebox.showinfo(
+                "Lote",
+                "Todas as inscrições selecionadas já constam como CONCLUÍDAS no checkpoint local.",
+            )
             return
 
         linhas = "\n".join(
@@ -179,7 +181,7 @@ class AppFGTSFase6(AppFGTS):
                 except DownloadRelatorioTimeout as exc:
                     pendencias += 1
                     try:
-                        achatar_downloads(self.resultado.competencia, item.inscricao)
+                        achatar_downloads(self.resultado.competencia, item.inscricao, item.tag)
                     except Exception:
                         pass
                     salvar_status(
@@ -244,12 +246,19 @@ class AppFGTSFase6(AppFGTS):
             except Exception:
                 pass
 
+            checkpoint = (
+                Path.home()
+                / "Downloads"
+                / "FGTS_por_obra_poligonal"
+                / self.resultado.competencia.replace("/", "-")
+                / "controle_lote.json"
+            )
             resumo = (
                 f"Lote {'INTERROMPIDO' if interrompido else 'FINALIZADO'}\n\n"
                 f"Concluídas: {concluidos}\n"
                 f"Pendências de relatório: {pendencias}\n"
                 f"Erros: {erros}\n\n"
-                "O checkpoint local foi atualizado em downloads\\<competência>\\controle_lote.json."
+                f"Checkpoint: {checkpoint}"
             )
             self._log_worker(resumo.replace("\n", " | "))
             self._mostrar_worker("info" if not erros else "aviso", "Resumo do lote", resumo)
