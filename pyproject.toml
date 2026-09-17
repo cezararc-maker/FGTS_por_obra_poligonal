@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fgts-por-obra-poligonal"
+version = "1.0.0"
+description = "Automação assistida para geração de guias do FGTS Digital por inscrição/obra"
+requires-python = ">=3.11"
+dependencies = [
+    "openpyxl>=3.1,<4",
+    "playwright>=1.50,<2",
+]
+
+[project.scripts]
+fgts-obra = "fgts_obra.app_final:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
