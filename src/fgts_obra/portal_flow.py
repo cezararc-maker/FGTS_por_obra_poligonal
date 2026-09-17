@@ -78,9 +78,7 @@ def _campo_competencia(page: Page, nome: str) -> Locator:
 
 
 def _texto_competencia_renderizado(campo: Locator, valor_esperado: str) -> str:
-    """Retorna a competência que está visível no controle do portal."""
     candidatos: list[str] = []
-
     try:
         valor_input = campo.input_value().strip()
         if valor_input:
@@ -110,14 +108,11 @@ def _texto_competencia_renderizado(campo: Locator, valor_esperado: str) -> str:
 
 
 def _opcao_competencia_visivel(page: Page, valor: str) -> Locator:
-    """Localiza a competência somente dentro da lista aberta pelo campo."""
     opcoes = _visiveis(page.get_by_role("option", name=valor, exact=True))
     if len(opcoes) == 1:
         return opcoes[0]
     if len(opcoes) > 1:
-        raise PortalFlowError(
-            f"A lista de competências apresentou mais de uma opção visível para '{valor}'."
-        )
+        raise PortalFlowError(f"A lista apresentou mais de uma opção visível para '{valor}'.")
 
     textos = _visiveis(page.get_by_text(valor, exact=True))
     candidatos: list[Locator] = []
@@ -136,22 +131,14 @@ def _opcao_competencia_visivel(page: Page, valor: str) -> Locator:
     if len(candidatos) == 1:
         return candidatos[0]
     if len(candidatos) > 1:
-        raise PortalFlowError(
-            f"A lista de competências apresentou mais de uma opção candidata para '{valor}'."
-        )
-
-    raise PortalFlowError(
-        f"A competência '{valor}' não apareceu de forma identificável na lista de competências em aberto."
-    )
+        raise PortalFlowError(f"A lista apresentou mais de uma opção candidata para '{valor}'.")
+    raise PortalFlowError(f"A competência '{valor}' não apareceu na lista de competências em aberto.")
 
 
 def _selecionar_competencia(page: Page, nome: str, valor: str) -> None:
-    """Clica no campo e escolhe a competência na lista exibida pelo FGTS Digital."""
     campo = _campo_competencia(page, nome)
-
     campo.click()
     page.wait_for_timeout(300)
-
     opcao = _opcao_competencia_visivel(page, valor)
     opcao.click()
     page.wait_for_timeout(350)
@@ -182,27 +169,28 @@ def _desmarcar_vencido(page: Page) -> None:
         if len(labels) == 1:
             labels[0].click()
         elif len(labels) > 1:
-            raise PortalFlowError("Mais de um label visível foi encontrado para o controle 'Vencido'.")
+            raise PortalFlowError("Mais de um label visível foi encontrado para 'Vencido'.")
         else:
-            label_texto = _unico_visivel(page.get_by_text("Vencido", exact=True), "label Vencido")
-            label_texto.click()
+            _unico_visivel(page.get_by_text("Vencido", exact=True), "label Vencido").click()
     else:
-        label_texto = _unico_visivel(page.get_by_text("Vencido", exact=True), "label Vencido")
-        label_texto.click()
+        _unico_visivel(page.get_by_text("Vencido", exact=True), "label Vencido").click()
 
     page.wait_for_timeout(250)
     if controle.is_checked():
-        raise PortalFlowError("O controle 'Vencido' permaneceu marcado após clicar em seu label visível.")
+        raise PortalFlowError("O controle 'Vencido' permaneceu marcado após o clique.")
 
 
 def _expandir_pesquisa(page: Page) -> None:
     expandir = _visiveis(page.get_by_role("button", name="Expandir Pesquisa", exact=True))
     if len(expandir) == 1:
         expandir[0].click()
-        page.get_by_role("button", name="Ocultar Pesquisa Expandida", exact=True).wait_for(
-            state="visible", timeout=10_000
-        )
+        page.wait_for_timeout(350)
         return
+
+    # Se os campos expandidos já estiverem visíveis, consideramos a seção aberta.
+    if _visiveis(page.get_by_text("Estabelecimento da Remuneração", exact=True)):
+        return
+
     ocultar = _visiveis(page.get_by_role("button", name="Ocultar Pesquisa Expandida", exact=True))
     if len(ocultar) == 1:
         return
@@ -210,70 +198,84 @@ def _expandir_pesquisa(page: Page) -> None:
 
 
 def _secao_estabelecimento(page: Page) -> Locator:
-    for seletor in ("fieldset", "section", "[role='group']"):
-        encontrados = _visiveis(page.locator(seletor).filter(has_text="Estabelecimento da Remuneração"))
-        if len(encontrados) == 1:
-            return encontrados[0]
-        if len(encontrados) > 1:
-            ordenados = sorted(encontrados, key=lambda loc: len(loc.inner_text()))
-            return ordenados[0]
+    """Retorna somente o bloco 'Estabelecimento da Remuneração'.
 
+    A tela possui outros blocos com CNPJ/CNO (Tomador e Local de Trabalho), então
+    qualquer ancestral que também contenha esses títulos é rejeitado.
+    """
     titulo = _unico_visivel(
         page.get_by_text("Estabelecimento da Remuneração", exact=True),
         "Estabelecimento da Remuneração",
     )
+
+    candidatos: list[tuple[int, Locator]] = []
     atual = titulo
-    for _ in range(5):
+    for _ in range(7):
         atual = atual.locator("xpath=..")
         if atual.count() != 1:
             break
-        texto = atual.inner_text()
-        if "CNPJ" in texto and "CNO" in texto:
-            return atual
-    raise PortalFlowError("Contêiner de 'Estabelecimento da Remuneração' não pôde ser delimitado com segurança.")
+        try:
+            if not atual.is_visible():
+                continue
+            texto = " ".join(atual.inner_text().split())
+        except Exception:
+            continue
+
+        if "Estabelecimento da Remuneração" not in texto:
+            continue
+        if "CNPJ" not in texto or "CNO" not in texto:
+            continue
+        if "Tomador de Serviços" in texto or "Local de Trabalho Atual" in texto:
+            continue
+
+        campos = _visiveis(
+            atual.locator(
+                "input:enabled:not([type='radio']):not([type='checkbox']):"
+                "not([type='hidden']):not([type='button']):not([type='submit'])"
+            )
+        )
+        # O bloco esperado contém o campo 'Informe CNPJ, CAEPF ou CNO'.
+        if campos:
+            candidatos.append((len(texto), atual))
+
+    if not candidatos:
+        raise PortalFlowError(
+            "O bloco 'Estabelecimento da Remuneração' não pôde ser delimitado sem misturar "
+            "Tomador de Serviços ou Local de Trabalho Atual."
+        )
+
+    candidatos.sort(key=lambda item: item[0])
+    return candidatos[0][1]
 
 
 def _selecionar_tipo_e_campo(secao: Locator, tipo: str) -> Locator:
+    # Dentro do bloco já delimitado deve existir apenas um CNPJ/CNO correspondente.
     tipo_texto = _unico_visivel(secao.get_by_text(tipo, exact=True), f"tipo de inscrição {tipo}")
     tipo_texto.click()
 
-    atual = tipo_texto
-    seletor_texto = (
-        "input:enabled:not([type='radio']):not([type='checkbox']):not([type='hidden']):"
-        "not([type='button']):not([type='submit'])"
+    # O campo do Estabelecimento da Remuneração possui placeholder próprio observado na tela.
+    campos_placeholder = _visiveis(
+        secao.locator("input[placeholder*='CNPJ'][placeholder*='CAEPF'][placeholder*='CNO']")
     )
-    for _ in range(5):
-        atual = atual.locator("xpath=..")
-        campos = _visiveis(atual.locator(seletor_texto))
-        if len(campos) == 1:
-            return campos[0]
-        if len(campos) > 1:
-            break
+    if len(campos_placeholder) == 1:
+        return campos_placeholder[0]
+    if len(campos_placeholder) > 1:
+        raise PortalFlowError(
+            "Mais de um campo de inscrição foi encontrado dentro de 'Estabelecimento da Remuneração'."
+        )
 
-    campos = _visiveis(secao.locator(seletor_texto))
-    candidatos: list[Locator] = []
-    termos_excluir = ("lotação", "lotacao", "cpf", "matrícula", "matricula", "categoria")
-    for campo in campos:
-        atributos = " ".join(
-            filter(
-                None,
-                [
-                    campo.get_attribute("aria-label"),
-                    campo.get_attribute("placeholder"),
-                    campo.get_attribute("name"),
-                    campo.get_attribute("id"),
-                ],
-            )
-        ).lower()
-        if not any(termo in atributos for termo in termos_excluir):
-            candidatos.append(campo)
-
-    if len(candidatos) == 1:
-        return candidatos[0]
+    # Fallback ainda restrito ao bloco correto.
+    campos = _visiveis(
+        secao.locator(
+            "input:enabled:not([type='radio']):not([type='checkbox']):not([type='hidden']):"
+            "not([type='button']):not([type='submit'])"
+        )
+    )
+    if len(campos) == 1:
+        return campos[0]
 
     raise PortalFlowError(
-        "O campo numérico da inscrição não pôde ser identificado de forma única dentro de "
-        "'Estabelecimento da Remuneração'. Nenhum preenchimento foi feito nesse campo."
+        "O campo de inscrição do bloco 'Estabelecimento da Remuneração' não foi identificado de forma única."
     )
 
 
@@ -336,7 +338,7 @@ def executar_pesquisa_segura(
     _expandir_pesquisa(page)
     secao = _secao_estabelecimento(page)
 
-    log(f"[7/8] Selecionando {tipo_inscricao} e preenchendo a inscrição...")
+    log(f"[7/8] Selecionando {tipo_inscricao} em Estabelecimento da Remuneração e preenchendo a inscrição...")
     campo = _selecionar_tipo_e_campo(secao, tipo_inscricao)
     campo.fill(inscricao)
     campo.press("Tab")
