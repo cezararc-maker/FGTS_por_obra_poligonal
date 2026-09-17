@@ -69,6 +69,24 @@ def _como_data(valor: Any) -> date | None:
         return valor.date()
     if isinstance(valor, date):
         return valor
+
+    if isinstance(valor, str):
+        texto = valor.strip()
+        if not texto:
+            return None
+
+        formatos = (
+            "%d/%m/%Y",  # 18/09/2026
+            "%m/%Y",     # 08/2026 -> primeiro dia do mês
+            "%Y-%m-%d",  # 2026-09-18
+            "%Y-%m",     # 2026-08 -> primeiro dia do mês
+        )
+        for formato in formatos:
+            try:
+                return datetime.strptime(texto, formato).date()
+            except ValueError:
+                continue
+
     return None
 
 
@@ -101,7 +119,9 @@ def ler_planilha(caminho: str | Path) -> ResultadoPlanilha:
     )
 
     if competencia_data is None:
-        resultado.erros.append("B1 não contém uma competência reconhecível como data do Excel.")
+        resultado.erros.append(
+            "B1 não contém uma competência reconhecível. Use uma data do Excel ou texto no formato MM/AAAA."
+        )
 
     cabecalhos = {str(ws.cell(3, col).value or "").strip(): col for col in range(1, ws.max_column + 1)}
     faltantes = CABECALHOS_OBRIGATORIOS - set(cabecalhos)
@@ -163,7 +183,9 @@ def ler_planilha(caminho: str | Path) -> ResultadoPlanilha:
         )
 
     if resultado.vencimento_conferencia is None:
-        resultado.avisos.append("E1 não contém vencimento de conferência reconhecível como data.")
+        resultado.avisos.append(
+            "E1 não contém vencimento de conferência reconhecível. Use uma data do Excel ou texto DD/MM/AAAA."
+        )
     elif resultado.vencimento_conferencia != resultado.vencimento_calculado:
         resultado.avisos.append(
             "Vencimento divergente: calculado "
