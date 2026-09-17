@@ -1,15 +1,40 @@
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 
-def _arquivo_controle(competencia: str) -> Path:
-    pasta = Path.cwd() / "downloads" / competencia.replace("/", "-")
+def _pasta_controle(competencia: str) -> Path:
+    pasta = (
+        Path.home()
+        / "Downloads"
+        / "FGTS_por_obra_poligonal"
+        / competencia.replace("/", "-")
+    )
     pasta.mkdir(parents=True, exist_ok=True)
-    return pasta / "controle_lote.json"
+    return pasta
+
+
+def _arquivo_legado(competencia: str) -> Path:
+    return Path.cwd() / "downloads" / competencia.replace("/", "-") / "controle_lote.json"
+
+
+def _arquivo_controle(competencia: str) -> Path:
+    destino = _pasta_controle(competencia) / "controle_lote.json"
+    legado = _arquivo_legado(competencia)
+
+    # Migra automaticamente o checkpoint criado nos testes anteriores para não perder
+    # a proteção contra reprocessamento das inscrições já concluídas.
+    if not destino.exists() and legado.exists():
+        try:
+            shutil.copy2(legado, destino)
+        except Exception:
+            pass
+
+    return destino
 
 
 def chave_item(competencia: str, tipo_inscricao: str, inscricao: str) -> str:
