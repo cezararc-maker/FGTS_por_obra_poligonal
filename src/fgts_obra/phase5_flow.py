@@ -46,13 +46,35 @@ def _texto_pagina(page: Page) -> str:
         return ""
 
 
-def _botao_unico(page: Page, nome: str) -> Locator:
-    candidatos = pf._visiveis(page.get_by_role("button", name=nome, exact=True))
-    if len(candidatos) == 1:
-        return candidatos[0]
-    if len(candidatos) > 1:
-        raise pf.PortalFlowError(f"Mais de um botão '{nome}' ficou visível.")
-    raise pf.PortalFlowError(f"Botão '{nome}' não foi localizado de forma única.")
+def _overlay_carregamento_visivel(page: Page) -> bool:
+    """Detecta a camada que bloqueia cliques enquanto o FGTS Digital processa."""
+    for seletor in ("app-loading .backdrop", "app-loading", ".backdrop"):
+        try:
+            if pf._visiveis(page.locator(seletor)):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _aguardar_sem_overlay(page: Page, timeout_ms: int = 90_000) -> None:
+    """Aguarda o portal permanecer desbloqueado por uma pequena janela estável."""
+    limite = time.monotonic() + timeout_ms / 1000
+    inicio_estavel: float | None = None
+
+    while time.monotonic() < limite:
+        if not _overlay_carregamento_visivel(page):
+            if inicio_estavel is None:
+                inicio_estavel = time.monotonic()
+            elif time.monotonic() - inicio_estavel >= 0.8:
+                return
+        else:
+            inicio_estavel = None
+        page.wait_for_timeout(200)
+
+    raise pf.PortalFlowError(
+        f"O portal permaneceu com a camada de carregamento ativa por mais de {timeout_ms // 1000} segundos."
+    )
 
 
 def _aguardar_botao_habilitado(page: Page, nome: str, timeout_ms: int = 60_000) -> Locator:
@@ -68,23 +90,47 @@ def _aguardar_botao_habilitado(page: Page, nome: str, timeout_ms: int = 60_000) 
     raise pf.PortalFlowError(f"Botão '{nome}' não ficou habilitado em até {timeout_ms // 1000} segundos.")
 
 
-def _aguardar_etapa_emitir_guia(page: Page, timeout_ms: int = 60_000) -> Locator:
+def _aguardar_etapa_emitir_guia(page: Page, timeout_ms: int = 90_000) -> Locator:
+    """Localiza o botão real e só o libera quando a tela não estiver bloqueada."""
     limite = time.monotonic() + timeout_ms / 1000
+
     while time.monotonic() < limite:
-        botoes = pf._visiveis(page.get_by_role("button", name="Emitir Guia", exact=True))
-        habilitados = [item for item in botoes if item.is_enabled()]
-        if len(habilitados) == 1:
-            return habilitados[0]
-        if len(habilitados) > 1:
-            raise pf.PortalFlowError("Mais de um botão 'Emitir Guia' habilitado ficou visível.")
+        # Estrutura observada no portal:
+        # <button type="button" class="br-button primary wizard-btn"> Emitir Guia </button>
+        candidatos = pf._visiveis(page.locator("button.br-button.primary.wizard-btn"))
+        emitir = []
+        for item in candidatos:
+            try:
+                if item.inner_text().strip() == "Emitir Guia" and item.is_enabled():
+                    emitir.append(item)
+            except Exception:
+                pass
+
+        if len(emitir) > 1:
+            raise pf.PortalFlowError("Mais de um botão real 'Emitir Guia' habilitado ficou visível.")
+
+        if len(emitir) == 1 and not _overlay_carregamento_visivel(page):
+            _aguardar_sem_overlay(page, timeout_ms=10_000)
+            return emitir[0]
+
         page.wait_for_timeout(300)
-    raise pf.PortalFlowError("A etapa final não liberou o botão 'Emitir Guia' em até 60 segundos.")
+
+    raise pf.PortalFlowError(
+        "A etapa Emitir Guia não ficou pronta para clique em até 90 segundos. "
+        "O botão pode estar visível, mas ainda coberto pela camada de carregamento."
+    )
 
 
 def _aguardar_pos_emissao(page: Page, timeout_ms: int = 90_000) -> None:
     limite = time.monotonic() + timeout_ms / 1000
     while time.monotonic() < limite:
-        botoes_pdf = pf._visiveis(page.get_by_role("button", name=re.compile(r"Imprimir Relatório em PDF", re.IGNORECASE)))
+        if _overlay_carregamento_visivel(page):
+            page.wait_for_timeout(300)
+            continue
+
+        botoes_pdf = pf._visiveis(
+            page.get_by_role("button", name=re.compile(r"Imprimir Relatório em PDF", re.IGNORECASE))
+        )
         if botoes_pdf:
             return
         if pf._visiveis(page.get_by_text("Reiniciar", exact=True)):
@@ -94,7 +140,9 @@ def _aguardar_pos_emissao(page: Page, timeout_ms: int = 90_000) -> None:
 
 
 def _botoes_relatorio_pdf(page: Page) -> list[Locator]:
-    candidatos = pf._visiveis(page.get_by_role("button", name=re.compile(r"Imprimir Relatório em PDF", re.IGNORECASE)))
+    candidatos = pf._visiveis(
+        page.get_by_role("button", name=re.compile(r"Imprimir Relatório em PDF", re.IGNORECASE))
+    )
     if not candidatos:
         candidatos = pf._visiveis(page.get_by_text(re.compile(r"Imprimir Relatório em PDF", re.IGNORECASE)))
 
@@ -193,11 +241,11 @@ def executar_fase5(
     avancar = _aguardar_botao_habilitado(page, "Avançar", timeout_ms=60_000)
     avancar.click()
 
-    log("[3/6] Aguardando a etapa Emitir Guia ficar pronta...")
-    emitir = _aguardar_etapa_emitir_guia(page, timeout_ms=60_000)
+    log("[3/6] Aguardando a etapa Emitir Guia ficar totalmente desbloqueada...")
+    emitir = _aguardar_etapa_emitir_guia(page, timeout_ms=90_000)
 
     log("[4/6] Emitindo a guia...")
-    emitir.click()
+    emitir.click(timeout=10_000)
 
     log("[5/6] Aguardando o portal concluir a emissão e liberar os relatórios...")
     _aguardar_pos_emissao(page)
