@@ -1,114 +1,126 @@
 # Planilha modelo — análise estrutural e decisões confirmadas
 
-Arquivo analisado inicialmente no chat: `FGTS_Extrator_Poligonal.xlsx`.
+Arquivo atualizado analisado no chat: `FGTS_Extrator_Poligonal(1).xlsx`.
 
 > O arquivo operacional não deve ser versionado neste repositório público. Este documento registra somente a estrutura necessária para o desenvolvimento.
 
-## Estrutura observada na primeira versão recebida
+## Estrutura validada na versão atualizada
 
 - Aba: `fgts_servicos (1)`
-- Competência: célula `B1`, exibida como `08/2026`
-- Vencimento: célula `E1`, exibida na primeira versão como `18/09/206`
+- Competência: célula `B1`, armazenada como data de agosto/2026 e exibida como `08/2026`
+- Vencimento de conferência: célula `E1`, armazenada como `18/09/2026`
 - Linha de cabeçalho: linha 3
 - Dados: linhas 4 a 29
 - Quantidade de registros: 26
 
-Colunas observadas na primeira versão:
+Colunas atuais:
 
 | Coluna | Cabeçalho | Uso |
 |---|---|---|
 | A | Codigo | código interno da obra/serviço |
-| B | Servico | descrição do serviço/obra |
-| C | TAG | valor literal a ser informado no campo TAG do FGTS Digital |
-| D | Documento | número da inscrição a pesquisar no portal |
-| E | FGTS | valor apenas para análise/referência |
-| F | FGTS Aprendiz | valor apenas para análise/referência |
+| B | Tipo Inscrição | determina diretamente `CNPJ` ou `CNO` no portal |
+| C | Servico | descrição do serviço/obra |
+| D | TAG | valor literal a ser informado no campo TAG do FGTS Digital |
+| E | Documento | número da inscrição a pesquisar no portal |
+| F | FGTS | valor apenas para análise/referência |
+| G | FGTS Aprendiz | valor apenas para análise/referência |
 
-Na primeira versão recebida foram observados 26 registros, sem duplicidade de código, documento ou TAG e sem campos vazios nas colunas utilizadas.
+## Validação do conteúdo atualizado
 
-## Decisões confirmadas pelo usuário
+- 26 registros preenchidos;
+- 1 linha com tipo `CNPJ`;
+- 25 linhas com tipo `CNO`;
+- nenhuma duplicidade de código;
+- nenhuma duplicidade de documento;
+- nenhuma duplicidade de TAG;
+- nenhuma linha de dados com campos funcionais vazios;
+- vencimento de conferência corrigido para `18/09/2026`.
 
-### Tipo de inscrição
+## Tipo de inscrição
 
-O usuário confirmou que criou na planilha atualizada uma coluna específica para indicar o tipo de inscrição.
+A decisão está fechada: a automação deve ler a coluna `Tipo Inscrição` e utilizar diretamente seu valor para selecionar `CNPJ` ou `CNO` no portal.
 
-A automação deverá usar essa coluna diretamente para decidir entre `CNPJ` e `CNO` no portal, sem inferir o tipo a partir do texto de `Servico`.
+Não deve inferir o tipo a partir do texto de `Servico`.
 
-A versão atualizada da planilha ainda precisa ser validada no chat para registrar o nome exato da coluna e sua posição.
+Valores aceitos inicialmente: `CNPJ` e `CNO`.
 
-### TAG
+## TAG
 
 A automação deve ler o valor da coluna `TAG` e utilizá-lo literalmente no portal.
 
 Não deve reconstruir a TAG a partir de código e nome da obra. Qualquer futura normalização, truncamento ou remoção de caracteres dependerá de limitação real observada no portal e aprovação do usuário.
 
-### Documento
+## Documento e zeros à esquerda
 
-O documento deve ser tratado como texto para preservar zeros à esquerda, especialmente no CNPJ.
+Na versão atualizada, a coluna `Documento` continua armazenada como valor numérico. Existe um CNPJ que visualmente começa com zero, mas a leitura bruta do valor numérico perde esse zero inicial.
 
-A validação será orientada pelo `Tipo de Inscrição` informado na própria linha.
+Isso não impede o desenvolvimento, porque o leitor terá o `Tipo Inscrição` explícito e poderá normalizar o documento antes do uso:
 
-### FGTS e FGTS Aprendiz
+- `CNPJ`: converter para somente dígitos e completar à esquerda até 14 dígitos;
+- `CNO`: tratar como identificador textual e validar conforme o formato adotado no projeto.
+
+Mesmo assim, quando possível, é preferível manter a coluna `Documento` como texto no Excel para preservar o identificador exatamente como digitado.
+
+A automação nunca deve enviar ao portal um documento sem validar o número de dígitos e o tipo da inscrição.
+
+## FGTS e FGTS Aprendiz
 
 As colunas `FGTS` e `FGTS Aprendiz` são apenas para análise/referência.
 
 O valor efetivamente utilizado para geração e validação operacional da guia será o valor apresentado pelo próprio portal FGTS Digital.
 
-Portanto, divergência entre essas colunas e o portal não deve, por si só, bloquear a automação, salvo decisão futura específica.
+Divergência entre essas colunas e o portal não deve bloquear a automação, salvo decisão futura específica.
 
-### Competência
+## Competência
 
 A competência da planilha deverá ser normalizada para `MM/AAAA` e usada nos campos Inicial e Final do portal.
 
 Para o teste atual: `08/2026`.
 
-### Vencimento
+## Vencimento
 
 O vencimento será calculado pela automação a partir da competência e das regras aplicáveis.
 
 O vencimento existente na planilha será utilizado somente como conferência visual/adicional. Ele não será a fonte principal da data digitada no portal.
 
-Para a competência `08/2026`, o vencimento esperado é `18/09/2026`.
+Para a competência `08/2026`, o vencimento esperado e também presente no modelo atualizado é `18/09/2026`.
 
 Se o vencimento calculado pela automação divergir do valor de conferência da planilha, a aplicação deverá informar a divergência ao operador antes do processamento, sem substituir silenciosamente um pelo outro.
 
-## Layout mínimo esperado após atualização
+## Layout funcional fechado para o leitor
 
-A versão atualizada deverá conter, no mínimo, os seguintes campos funcionais:
+O leitor deverá trabalhar com:
 
 ```text
-Competência
+Competência (B1)
+Vencimento de conferência (E1)
 Codigo
+Tipo Inscrição
 Servico
 TAG
-Tipo Inscrição
 Documento
 FGTS
 FGTS Aprendiz
-Vencimento de conferência
 ```
 
-Os nomes e posições exatos serão registrados depois da validação da planilha atualizada.
+A planilha original não deve ser sobrescrita silenciosamente. Estados da execução, logs e resultados deverão ficar em armazenamento próprio da aplicação e/ou relatório separado.
 
-## Regras de validação já fechadas
+## Regras de validação antes de abrir o portal
 
-Antes de iniciar o portal, o leitor deverá validar:
-
-- presença do tipo de inscrição;
-- tipo limitado inicialmente a `CNPJ` ou `CNO`;
-- documento preenchido;
-- preservação de zeros à esquerda;
-- TAG preenchida;
-- código preenchido;
-- serviço/obra preenchido;
+- planilha e aba esperada acessíveis;
 - competência válida;
+- vencimento de conferência legível;
+- código preenchido;
+- `Tipo Inscrição` preenchido e limitado inicialmente a `CNPJ`/`CNO`;
+- serviço preenchido;
+- TAG preenchida;
+- documento preenchido;
+- documento normalizado de acordo com o tipo;
+- CNPJ preservado/normalizado para 14 dígitos, inclusive quando inicia por zero;
 - duplicidade de documento;
 - duplicidade ou conflito de linhas;
 - vencimento calculado e eventual divergência com o vencimento de conferência.
 
-## Pendente apenas de validação da nova planilha
+## Situação da planilha
 
-1. Nome exato e posição da nova coluna de tipo de inscrição.
-2. Confirmação de que `Documento` está armazenado como texto ou pode ser normalizado sem perda.
-3. Confirmação de que o vencimento de conferência foi corrigido para `18/09/2026` no modelo atualizado.
-4. Nova contagem de registros e verificação de duplicidades/campos vazios.
+Com a versão atualizada, a estrutura da planilha está aprovada para seguirmos para a implementação do leitor e das regras de negócio, após a aprovação geral da arquitetura pelo usuário.
