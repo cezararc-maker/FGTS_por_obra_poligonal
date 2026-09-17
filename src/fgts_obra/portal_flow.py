@@ -66,13 +66,19 @@ def _clicar_texto_priorizado(page: Page, texto: str) -> None:
     raise PortalFlowError(f"Elemento visível não encontrado: '{texto}'.")
 
 
-def _texto_competencia_renderizado(campo: Locator, valor_esperado: str) -> str:
-    """Obtém o valor que o usuário realmente enxerga no componente.
+def _campo_competencia(page: Page, nome: str) -> Locator:
+    candidatos = page.get_by_role("combobox", name=nome, exact=True)
+    itens = _visiveis(candidatos)
+    if len(itens) != 1:
+        candidatos = page.get_by_label(nome, exact=True)
+        itens = _visiveis(candidatos)
+    if len(itens) != 1:
+        raise PortalFlowError(f"Campo de competência '{nome}' não foi identificado de forma única.")
+    return itens[0]
 
-    O FGTS Digital usa um componente de seleção cujo input interno pode ficar
-    vazio mesmo quando existe uma competência visível selecionada. Por isso,
-    não usamos apenas input_value() como prova do estado.
-    """
+
+def _texto_competencia_renderizado(campo: Locator, valor_esperado: str) -> str:
+    """Retorna a competência que está visível no controle do portal."""
     candidatos: list[str] = []
 
     try:
@@ -103,66 +109,57 @@ def _texto_competencia_renderizado(campo: Locator, valor_esperado: str) -> str:
     return candidatos[0] if candidatos else ""
 
 
-def _selecionar_opcao_competencia(page: Page, valor: str) -> bool:
-    """Seleciona explicitamente a opção de competência aberta no autocomplete."""
-    tentativas = (
-        page.get_by_role("option", name=valor, exact=True),
-        page.get_by_text(valor, exact=True),
-    )
-    for locator in tentativas:
-        itens = _visiveis(locator)
-        # Durante a edição pode existir o valor já renderizado no próprio campo
-        # e a opção do popup. Priorizamos candidatos cujo ancestral parece popup/lista.
-        if not itens:
+def _opcao_competencia_visivel(page: Page, valor: str) -> Locator:
+    """Localiza a competência somente dentro da lista aberta pelo campo."""
+    opcoes = _visiveis(page.get_by_role("option", name=valor, exact=True))
+    if len(opcoes) == 1:
+        return opcoes[0]
+    if len(opcoes) > 1:
+        raise PortalFlowError(
+            f"A lista de competências apresentou mais de uma opção visível para '{valor}'."
+        )
+
+    textos = _visiveis(page.get_by_text(valor, exact=True))
+    candidatos: list[Locator] = []
+    for item in textos:
+        try:
+            popup = item.locator(
+                "xpath=ancestor::*[@role='listbox' or @role='menu' or "
+                "contains(@class,'dropdown') or contains(@class,'overlay') or "
+                "contains(@class,'panel')][1]"
+            )
+            if popup.count() == 1 and popup.is_visible():
+                candidatos.append(item)
+        except Exception:
             continue
-        if len(itens) == 1:
-            itens[0].click()
-            return True
-        for item in itens:
-            try:
-                ancestral = item.locator("xpath=ancestor::*[@role='listbox' or contains(@class,'dropdown') or contains(@class,'option')][1]")
-                if ancestral.count() and ancestral.is_visible():
-                    item.click()
-                    return True
-            except Exception:
-                continue
-    return False
+
+    if len(candidatos) == 1:
+        return candidatos[0]
+    if len(candidatos) > 1:
+        raise PortalFlowError(
+            f"A lista de competências apresentou mais de uma opção candidata para '{valor}'."
+        )
+
+    raise PortalFlowError(
+        f"A competência '{valor}' não apareceu de forma identificável na lista de competências em aberto."
+    )
 
 
-def _preencher_competencia(page: Page, nome: str, valor: str) -> None:
-    candidatos = page.get_by_role("combobox", name=nome, exact=True)
-    itens = _visiveis(candidatos)
-    if len(itens) != 1:
-        candidatos = page.get_by_label(nome, exact=True)
-        itens = _visiveis(candidatos)
-    if len(itens) != 1:
-        raise PortalFlowError(f"Campo de competência '{nome}' não foi identificado de forma única.")
+def _selecionar_competencia(page: Page, nome: str, valor: str) -> None:
+    """Clica no campo e escolhe a competência na lista exibida pelo FGTS Digital."""
+    campo = _campo_competencia(page, nome)
 
-    campo = itens[0]
-
-    # O controle do portal é um autocomplete customizado. Digitar + Tab pode
-    # manter a competência padrão. A estratégia segura é abrir, digitar e
-    # selecionar explicitamente a opção correspondente.
     campo.click()
-    try:
-        campo.press("Control+A")
-    except Exception:
-        pass
-    campo.fill(valor)
-    page.wait_for_timeout(400)
+    page.wait_for_timeout(300)
 
-    selecionou = _selecionar_opcao_competencia(page, valor)
-    if not selecionou:
-        # Alguns componentes só materializam a opção após teclado.
-        campo.press("ArrowDown")
-        page.wait_for_timeout(150)
-        campo.press("Enter")
+    opcao = _opcao_competencia_visivel(page, valor)
+    opcao.click()
+    page.wait_for_timeout(350)
 
-    page.wait_for_timeout(400)
     recebido = _texto_competencia_renderizado(campo, valor).strip()
     if recebido != valor:
         raise PortalFlowError(
-            f"Competência {nome} divergente após preenchimento: esperado '{valor}', recebido '{recebido}'."
+            f"Competência {nome} divergente após seleção: esperado '{valor}', recebido '{recebido}'."
         )
 
 
@@ -238,9 +235,7 @@ def _selecionar_tipo_e_campo(secao: Locator, tipo: str) -> Locator:
 
     campos = _visiveis(secao.locator(seletor_texto))
     candidatos: list[Locator] = []
-    termos_excluir = (
-        "lotação", "lotacao", "cpf", "matrícula", "matricula", "categoria"
-    )
+    termos_excluir = ("lotação", "lotacao", "cpf", "matrícula", "matricula", "categoria")
     for campo in campos:
         atributos = " ".join(
             filter(
@@ -313,9 +308,9 @@ def executar_pesquisa_segura(
     else:
         log("[2/8] A tela de Guia Parametrizada já está aberta.")
 
-    log(f"[4/8] Preenchendo competência Inicial/Final: {competencia}...")
-    _preencher_competencia(page, "Inicial", competencia)
-    _preencher_competencia(page, "Final", competencia)
+    log(f"[4/8] Selecionando competência Inicial/Final na lista: {competencia}...")
+    _selecionar_competencia(page, "Inicial", competencia)
+    _selecionar_competencia(page, "Final", competencia)
 
     log("[5/8] Conferindo filtro Vencido...")
     _desmarcar_vencido(page)
