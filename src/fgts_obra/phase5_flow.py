@@ -17,7 +17,9 @@ LogFn = Callable[[str], None]
 
 class DownloadRelatorioTimeout(RuntimeError):
     def __init__(self, tipo: str) -> None:
-        super().__init__(f"O download do relatório em PDF de {tipo} não iniciou/concluiu dentro da janela de 5 segundos.")
+        super().__init__(
+            f"O download do relatório em PDF de {tipo} não iniciou dentro da janela de aproximadamente 5 segundos."
+        )
         self.tipo = tipo
 
 
@@ -34,6 +36,7 @@ class ResultadoFase5:
     inscricao: str
     competencia: str
     guia_emitida: bool
+    numero_guia: str
     fgts: ResultadoDownload
     consignado: ResultadoDownload
     reiniciado: bool
@@ -47,7 +50,6 @@ def _texto_pagina(page: Page) -> str:
 
 
 def _overlay_carregamento_visivel(page: Page) -> bool:
-    """Detecta a camada que bloqueia cliques enquanto o FGTS Digital processa."""
     for seletor in ("app-loading .backdrop", "app-loading", ".backdrop"):
         try:
             if pf._visiveis(page.locator(seletor)):
@@ -58,7 +60,6 @@ def _overlay_carregamento_visivel(page: Page) -> bool:
 
 
 def _aguardar_sem_overlay(page: Page, timeout_ms: int = 90_000) -> None:
-    """Aguarda o portal permanecer desbloqueado por uma pequena janela estável."""
     limite = time.monotonic() + timeout_ms / 1000
     inicio_estavel: float | None = None
 
@@ -91,14 +92,11 @@ def _aguardar_botao_habilitado(page: Page, nome: str, timeout_ms: int = 60_000) 
 
 
 def _aguardar_etapa_emitir_guia(page: Page, timeout_ms: int = 90_000) -> Locator:
-    """Localiza o botão real e só o libera quando a tela não estiver bloqueada."""
     limite = time.monotonic() + timeout_ms / 1000
 
     while time.monotonic() < limite:
-        # Estrutura observada no portal:
-        # <button type="button" class="br-button primary wizard-btn"> Emitir Guia </button>
         candidatos = pf._visiveis(page.locator("button.br-button.primary.wizard-btn"))
-        emitir = []
+        emitir: list[Locator] = []
         for item in candidatos:
             try:
                 if item.inner_text().strip() == "Emitir Guia" and item.is_enabled():
@@ -121,47 +119,135 @@ def _aguardar_etapa_emitir_guia(page: Page, timeout_ms: int = 90_000) -> Locator
     )
 
 
-def _aguardar_pos_emissao(page: Page, timeout_ms: int = 90_000) -> None:
+def _extrair_numero_guia(page: Page) -> str | None:
+    """Extrai o identificador exibido ao lado da TAG após a emissão.
+
+    Exemplo observado no portal: 0126091761792989-0.
+    O hífen diferencia o número da guia de CNPJ/CNO/CPF comuns exibidos na tela.
+    """
+    texto = _texto_pagina(page)
+    candidatos = re.findall(r"(?<!\d)(\d{12,25}-\d{1,4})(?!\d)", texto)
+    if not candidatos:
+        return None
+
+    # Na etapa pós-emissão o número da guia aparece na região superior, ao lado da TAG.
+    # Se houver mais de um candidato, evitamos escolher silenciosamente.
+    unicos = list(dict.fromkeys(candidatos))
+    if len(unicos) == 1:
+        return unicos[0]
+    return None
+
+
+def _aguardar_emissao_confirmada(page: Page, timeout_ms: int = 90_000) -> str:
+    """Aguarda a emissão real, sem aplicar o timeout curto dos downloads.
+
+    A emissão só é considerada concluída quando o overlay desapareceu e o número
+    da guia passou a existir na página. 'Reiniciar' sozinho não é suficiente.
+    """
     limite = time.monotonic() + timeout_ms / 1000
     while time.monotonic() < limite:
         if _overlay_carregamento_visivel(page):
             page.wait_for_timeout(300)
             continue
 
-        botoes_pdf = pf._visiveis(
-            page.get_by_role("button", name=re.compile(r"Imprimir Relatório em PDF", re.IGNORECASE))
-        )
-        if botoes_pdf:
-            return
-        if pf._visiveis(page.get_by_text("Reiniciar", exact=True)):
-            return
+        numero = _extrair_numero_guia(page)
+        if numero:
+            return numero
+
         page.wait_for_timeout(400)
-    raise pf.PortalFlowError("Após 'Emitir Guia', o portal não liberou os relatórios/reinício em até 90 segundos.")
 
-
-def _botoes_relatorio_pdf(page: Page) -> list[Locator]:
-    candidatos = pf._visiveis(
-        page.get_by_role("button", name=re.compile(r"Imprimir Relatório em PDF", re.IGNORECASE))
+    raise pf.PortalFlowError(
+        "Após 'Emitir Guia', o portal não apresentou o número da guia em até 90 segundos. "
+        "A automação não assumirá que a emissão terminou apenas porque o botão 'Reiniciar' apareceu."
     )
-    if not candidatos:
-        candidatos = pf._visiveis(page.get_by_text(re.compile(r"Imprimir Relatório em PDF", re.IGNORECASE)))
 
-    medidos: list[tuple[float, Locator]] = []
-    vistos: set[str] = set()
-    for item in candidatos:
+
+def _texto_elemento(locator: Locator) -> str:
+    partes: list[str] = []
+    try:
+        partes.append(locator.inner_text())
+    except Exception:
+        pass
+    for atributo in ("title", "aria-label", "name", "id", "class", "href"):
+        try:
+            valor = locator.get_attribute(atributo)
+            if valor:
+                partes.append(valor)
+        except Exception:
+            pass
+    try:
+        partes.append(locator.evaluate("el => el.outerHTML"))
+    except Exception:
+        pass
+    return " ".join(partes).lower()
+
+
+def _controle_pdf_secao(page: Page, secao: str) -> Locator | None:
+    """Localiza o controle PDF dentro da seção FGTS ou Consignado.
+
+    O portal atual exibe ícones circulares, não necessariamente um botão com o
+    texto 'Imprimir Relatório em PDF'. A busca fica restrita ao menor contêiner
+    estrutural da seção que contenha um descendente clicável identificável como PDF.
+    """
+    titulos = pf._visiveis(page.get_by_text(secao, exact=True))
+    if not titulos:
+        return None
+
+    candidatos_encontrados: list[Locator] = []
+    for titulo in titulos:
+        atual = titulo
+        for _ in range(6):
+            try:
+                atual = atual.locator("xpath=..")
+                clicaveis = pf._visiveis(atual.locator("button, a, [role='button']"))
+            except Exception:
+                break
+
+            pdfs: list[Locator] = []
+            for controle in clicaveis:
+                descricao = _texto_elemento(controle)
+                if "pdf" in descricao:
+                    pdfs.append(controle)
+
+            if len(pdfs) == 1:
+                candidatos_encontrados.append(pdfs[0])
+                break
+            if len(pdfs) > 1:
+                # Em FGTS pode haver PDF + CSV; só aceitamos um controle que seja
+                # inequivocamente PDF. Se mais de um contiver 'pdf', não adivinhamos.
+                return None
+
+    # Remove duplicidades geométricas do mesmo controle encontrado por títulos repetidos.
+    unicos: list[Locator] = []
+    chaves: set[str] = set()
+    for item in candidatos_encontrados:
         try:
             caixa = item.bounding_box()
             if not caixa:
                 continue
             chave = f"{round(caixa['x'])}:{round(caixa['y'])}:{round(caixa['width'])}:{round(caixa['height'])}"
-            if chave in vistos:
-                continue
-            vistos.add(chave)
-            medidos.append((caixa["y"], item))
         except Exception:
             continue
-    medidos.sort(key=lambda par: par[0])
-    return [item for _, item in medidos]
+        if chave not in chaves:
+            chaves.add(chave)
+            unicos.append(item)
+
+    if len(unicos) == 1:
+        return unicos[0]
+    return None
+
+
+def _aguardar_controle_pdf(page: Page, secao: str, timeout_ms: int = 20_000) -> Locator | None:
+    limite = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < limite:
+        if _overlay_carregamento_visivel(page):
+            page.wait_for_timeout(250)
+            continue
+        controle = _controle_pdf_secao(page, secao)
+        if controle is not None:
+            return controle
+        page.wait_for_timeout(300)
+    return None
 
 
 def _pasta_downloads(competencia: str, inscricao: str) -> Path:
@@ -188,6 +274,7 @@ def _baixar_relatorio(page: Page, botao: Locator, tipo: str, competencia: str, i
     sugerido = _nome_seguro(download.suggested_filename)
     destino = pasta / f"{tipo}_{sugerido}"
 
+    # save_as só retorna depois de o arquivo ter sido concluído pelo navegador.
     try:
         download.save_as(str(destino))
     except Exception as exc:
@@ -226,7 +313,7 @@ def executar_fase5(
     tag: str,
     log: LogFn,
 ) -> ResultadoFase5:
-    log("[1/6] Executando o fluxo validado até vencimento/TAG...")
+    log("[1/7] Executando o fluxo validado até vencimento/TAG...")
     executar_fase4(
         page,
         tipo_inscricao=tipo_inscricao,
@@ -237,35 +324,38 @@ def executar_fase5(
         log=log,
     )
 
-    log("[2/6] Aguardando 'Avançar' em Definir Vencimento...")
+    log("[2/7] Aguardando 'Avançar' em Definir Vencimento...")
     avancar = _aguardar_botao_habilitado(page, "Avançar", timeout_ms=60_000)
     avancar.click()
 
-    log("[3/6] Aguardando a etapa Emitir Guia ficar totalmente desbloqueada...")
+    log("[3/7] Aguardando a etapa Emitir Guia ficar totalmente desbloqueada...")
     emitir = _aguardar_etapa_emitir_guia(page, timeout_ms=90_000)
 
-    log("[4/6] Emitindo a guia...")
+    log("[4/7] Emitindo a guia...")
     emitir.click(timeout=10_000)
 
-    log("[5/6] Aguardando o portal concluir a emissão e liberar os relatórios...")
-    _aguardar_pos_emissao(page)
+    log("[5/7] Aguardando a emissão REAL terminar e o número da guia aparecer...")
+    numero_guia = _aguardar_emissao_confirmada(page, timeout_ms=90_000)
+    log(f"Guia emitida confirmada pelo portal. Número da guia: {numero_guia}.")
 
-    botoes = _botoes_relatorio_pdf(page)
-    if not botoes:
-        raise pf.PortalFlowError("A guia foi emitida, mas nenhum botão 'Imprimir Relatório em PDF' ficou disponível.")
-
-    log("[6/6] Baixando relatório em PDF do FGTS...")
-    fgts = _baixar_relatorio(page, botoes[0], "FGTS", competencia, inscricao)
+    log("[6/7] Localizando e baixando o relatório PDF do FGTS...")
+    pdf_fgts = _aguardar_controle_pdf(page, "FGTS", timeout_ms=20_000)
+    if pdf_fgts is None:
+        raise pf.PortalFlowError(
+            "A guia foi emitida e o número da guia foi confirmado, mas o controle PDF da seção FGTS "
+            "não pôde ser identificado de forma determinística em até 20 segundos."
+        )
+    fgts = _baixar_relatorio(page, pdf_fgts, "FGTS", competencia, inscricao)
 
     consignado = ResultadoDownload(tipo="CONSIGNADO", status="NÃO HÁ CONSIGNADO", caminho=None)
-    botoes = _botoes_relatorio_pdf(page)
-    if len(botoes) >= 2:
-        log("Baixando relatório em PDF do Consignado...")
-        consignado = _baixar_relatorio(page, botoes[1], "CONSIGNADO", competencia, inscricao)
+    pdf_consignado = _aguardar_controle_pdf(page, "Consignado", timeout_ms=3_000)
+    if pdf_consignado is not None:
+        log("Baixando relatório PDF do Consignado...")
+        consignado = _baixar_relatorio(page, pdf_consignado, "CONSIGNADO", competencia, inscricao)
     else:
-        log("Consignado: nenhum relatório em PDF disponível para esta guia.")
+        log("Consignado: nenhum controle PDF identificado; tratando como sem relatório de consignado.")
 
-    log("Reiniciando o fluxo para deixar o portal pronto para a próxima guia...")
+    log("[7/7] Reiniciando o fluxo para deixar o portal pronto para a próxima guia...")
     _reiniciar(page)
 
     return ResultadoFase5(
@@ -273,6 +363,7 @@ def executar_fase5(
         inscricao=inscricao,
         competencia=competencia,
         guia_emitida=True,
+        numero_guia=numero_guia,
         fgts=fgts,
         consignado=consignado,
         reiniciado=True,
