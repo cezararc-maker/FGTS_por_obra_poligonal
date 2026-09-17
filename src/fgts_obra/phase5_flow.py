@@ -248,7 +248,6 @@ def _aguardar_emissao_confirmada(
 
         page.wait_for_timeout(400)
 
-    # Leitura final antes de declarar timeout, cobrindo conclusão exatamente no limite.
     numero = _extrair_numero_guia(page)
     download = downloads_emitir[0] if downloads_emitir else None
     if numero:
@@ -369,8 +368,8 @@ def _salvar_guia_automatica(
 
     pasta = _pasta_downloads(competencia, inscricao) / "GUIA"
     pasta.mkdir(parents=True, exist_ok=True)
-    identificador = numero_guia or "NUMERO_NAO_IDENTIFICADO"
-    destino = pasta / f"GUIA_{_nome_seguro(identificador)}.pdf"
+    nome_original = _nome_seguro(download.suggested_filename)
+    destino = pasta / nome_original
 
     try:
         download.save_as(str(destino))
@@ -397,8 +396,8 @@ def _baixar_relatorio(page: Page, botao: Locator, tipo: str, competencia: str, i
     except PlaywrightTimeoutError as exc:
         raise DownloadRelatorioTimeout(tipo) from exc
 
-    sugerido = _nome_seguro(download.suggested_filename)
-    destino = pasta / f"{tipo}_{sugerido}"
+    nome_original = _nome_seguro(download.suggested_filename)
+    destino = pasta / nome_original
     try:
         download.save_as(str(destino))
     except Exception as exc:
