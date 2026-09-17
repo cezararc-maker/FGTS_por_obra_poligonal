@@ -66,6 +66,69 @@ def _clicar_texto_priorizado(page: Page, texto: str) -> None:
     raise PortalFlowError(f"Elemento visível não encontrado: '{texto}'.")
 
 
+def _texto_competencia_renderizado(campo: Locator, valor_esperado: str) -> str:
+    """Obtém o valor que o usuário realmente enxerga no componente.
+
+    O FGTS Digital usa um componente de seleção cujo input interno pode ficar
+    vazio mesmo quando existe uma competência visível selecionada. Por isso,
+    não usamos apenas input_value() como prova do estado.
+    """
+    candidatos: list[str] = []
+
+    try:
+        valor_input = campo.input_value().strip()
+        if valor_input:
+            candidatos.append(valor_input)
+    except Exception:
+        pass
+
+    atual = campo
+    for _ in range(4):
+        try:
+            atual = atual.locator("xpath=..")
+            if atual.count() != 1:
+                break
+            texto = " ".join(atual.inner_text().split())
+            if texto:
+                candidatos.append(texto)
+            if valor_esperado in texto:
+                return valor_esperado
+        except Exception:
+            break
+
+    for texto in candidatos:
+        achado = re.search(r"\b(0[1-9]|1[0-2])/\d{4}\b", texto)
+        if achado:
+            return achado.group(0)
+    return candidatos[0] if candidatos else ""
+
+
+def _selecionar_opcao_competencia(page: Page, valor: str) -> bool:
+    """Seleciona explicitamente a opção de competência aberta no autocomplete."""
+    tentativas = (
+        page.get_by_role("option", name=valor, exact=True),
+        page.get_by_text(valor, exact=True),
+    )
+    for locator in tentativas:
+        itens = _visiveis(locator)
+        # Durante a edição pode existir o valor já renderizado no próprio campo
+        # e a opção do popup. Priorizamos candidatos cujo ancestral parece popup/lista.
+        if not itens:
+            continue
+        if len(itens) == 1:
+            itens[0].click()
+            return True
+        for item in itens:
+            try:
+                ancestral = item.locator("xpath=ancestor::*[@role='listbox' or contains(@class,'dropdown') or contains(@class,'option')][1]")
+                if ancestral.count() and ancestral.is_visible():
+                    item.click()
+                    return True
+            except Exception:
+                continue
+    return False
+
+
 def _preencher_competencia(page: Page, nome: str, valor: str) -> None:
     candidatos = page.get_by_role("combobox", name=nome, exact=True)
     itens = _visiveis(candidatos)
@@ -76,10 +139,27 @@ def _preencher_competencia(page: Page, nome: str, valor: str) -> None:
         raise PortalFlowError(f"Campo de competência '{nome}' não foi identificado de forma única.")
 
     campo = itens[0]
+
+    # O controle do portal é um autocomplete customizado. Digitar + Tab pode
+    # manter a competência padrão. A estratégia segura é abrir, digitar e
+    # selecionar explicitamente a opção correspondente.
+    campo.click()
+    try:
+        campo.press("Control+A")
+    except Exception:
+        pass
     campo.fill(valor)
-    campo.press("Tab")
-    page.wait_for_timeout(250)
-    recebido = campo.input_value().strip()
+    page.wait_for_timeout(400)
+
+    selecionou = _selecionar_opcao_competencia(page, valor)
+    if not selecionou:
+        # Alguns componentes só materializam a opção após teclado.
+        campo.press("ArrowDown")
+        page.wait_for_timeout(150)
+        campo.press("Enter")
+
+    page.wait_for_timeout(400)
+    recebido = _texto_competencia_renderizado(campo, valor).strip()
     if recebido != valor:
         raise PortalFlowError(
             f"Competência {nome} divergente após preenchimento: esperado '{valor}', recebido '{recebido}'."
@@ -116,13 +196,11 @@ def _expandir_pesquisa(page: Page) -> None:
 
 
 def _secao_estabelecimento(page: Page) -> Locator:
-    # Preferência por estruturas semânticas; nenhuma coordenada ou nth global é usada.
     for seletor in ("fieldset", "section", "[role='group']"):
         encontrados = _visiveis(page.locator(seletor).filter(has_text="Estabelecimento da Remuneração"))
         if len(encontrados) == 1:
             return encontrados[0]
         if len(encontrados) > 1:
-            # usa o menor contêiner visível que ainda contém o título
             ordenados = sorted(encontrados, key=lambda loc: len(loc.inner_text()))
             return ordenados[0]
 
@@ -145,7 +223,6 @@ def _selecionar_tipo_e_campo(secao: Locator, tipo: str) -> Locator:
     tipo_texto = _unico_visivel(secao.get_by_text(tipo, exact=True), f"tipo de inscrição {tipo}")
     tipo_texto.click()
 
-    # Procura o campo de inscrição somente na vizinhança estrutural do tipo selecionado.
     atual = tipo_texto
     seletor_texto = (
         "input:enabled:not([type='radio']):not([type='checkbox']):not([type='hidden']):"
@@ -159,7 +236,6 @@ def _selecionar_tipo_e_campo(secao: Locator, tipo: str) -> Locator:
         if len(campos) > 1:
             break
 
-    # Fallback restrito à seção, excluindo campos conhecidos de outros filtros.
     campos = _visiveis(secao.locator(seletor_texto))
     candidatos: list[Locator] = []
     termos_excluir = (
