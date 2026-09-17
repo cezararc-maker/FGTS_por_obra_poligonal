@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import zipfile
 from pathlib import Path
 
 from .batch_state import salvar_status
@@ -24,14 +25,19 @@ def _pasta_origem_legada(competencia: str, inscricao: str) -> Path:
     )
 
 
-def pasta_destino_item(competencia: str, tag: str, inscricao: str) -> Path:
+def pasta_competencia(competencia: str) -> Path:
     pasta = (
         Path.home()
         / "Downloads"
         / "FGTS_por_obra_poligonal"
         / competencia.replace("/", "-")
-        / _nome_pasta_seguro(tag, inscricao)
     )
+    pasta.mkdir(parents=True, exist_ok=True)
+    return pasta
+
+
+def pasta_destino_item(competencia: str, tag: str, inscricao: str) -> Path:
+    pasta = pasta_competencia(competencia) / _nome_pasta_seguro(tag, inscricao)
     pasta.mkdir(parents=True, exist_ok=True)
     return pasta
 
@@ -66,7 +72,6 @@ def consolidar_downloads(competencia: str, inscricao: str, tag: str) -> dict[str
         shutil.move(str(arquivo), str(destino_arquivo))
         movidos[arquivo.name] = str(destino_arquivo)
 
-    # Remove somente diretórios vazios da estrutura temporária.
     for pasta in sorted((p for p in origem.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True):
         try:
             pasta.rmdir()
@@ -80,9 +85,72 @@ def consolidar_downloads(competencia: str, inscricao: str, tag: str) -> dict[str
     return movidos
 
 
-# Compatibilidade com chamadas já existentes na interface da Fase 6.
 def achatar_downloads(competencia: str, inscricao: str, tag: str = "") -> None:
     consolidar_downloads(competencia, inscricao, tag)
+
+
+def _competencia_mmaaaa(competencia: str) -> str:
+    match = re.fullmatch(r"\s*(\d{1,2})/(\d{4})\s*", competencia)
+    if not match:
+        raise ValueError(f"Competência inválida para gerar ZIP: {competencia!r}.")
+    mes = int(match.group(1))
+    ano = match.group(2)
+    if not 1 <= mes <= 12:
+        raise ValueError(f"Mês inválido na competência: {competencia!r}.")
+    return f"{mes:02d}{ano}"
+
+
+def gerar_zip_competencia(competencia: str) -> Path:
+    """Compacta todas as pastas de guias da competência em um único ZIP.
+
+    O ZIP é criado dentro da pasta da própria competência e contém somente as
+    subpastas das TAGs e seus arquivos. O checkpoint e o próprio ZIP ficam de fora.
+    Se o ZIP já existir, ele é recriado para refletir exatamente o estado atual.
+    """
+    pasta = pasta_competencia(competencia)
+    nome_zip = f"Guias de FGTS por Obra {_competencia_mmaaaa(competencia)}.zip"
+    destino_zip = pasta / nome_zip
+    temporario = pasta / f".{nome_zip}.tmp"
+
+    pastas_guias = sorted(
+        [item for item in pasta.iterdir() if item.is_dir()],
+        key=lambda p: p.name.casefold(),
+    )
+    if not pastas_guias:
+        raise RuntimeError(
+            f"Nenhuma pasta de guia foi encontrada em {pasta}. Não há conteúdo para compactar."
+        )
+
+    if temporario.exists():
+        temporario.unlink()
+
+    try:
+        with zipfile.ZipFile(temporario, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as arquivo_zip:
+            for pasta_guia in pastas_guias:
+                arquivos = sorted(
+                    [arquivo for arquivo in pasta_guia.rglob("*") if arquivo.is_file()],
+                    key=lambda p: str(p.relative_to(pasta)).casefold(),
+                )
+                if not arquivos:
+                    continue
+                for arquivo in arquivos:
+                    nome_interno = arquivo.relative_to(pasta)
+                    arquivo_zip.write(arquivo, arcname=str(nome_interno))
+
+        if temporario.stat().st_size <= 0:
+            raise RuntimeError("O arquivo ZIP foi criado vazio.")
+
+        if destino_zip.exists():
+            destino_zip.unlink()
+        temporario.replace(destino_zip)
+    except Exception:
+        try:
+            temporario.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+
+    return destino_zip
 
 
 def _novo_caminho(caminho_antigo: str | None, destino: Path) -> str | None:
