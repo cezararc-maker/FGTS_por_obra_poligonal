@@ -1,231 +1,316 @@
-# Informações necessárias antes de implementar o fluxo do portal
+# Informações e evidências necessárias antes da implementação
 
-Este documento separa o que já está definido do que ainda precisa ser confirmado com evidência real.
+Este documento é o checklist oficial do projeto antes de qualquer código específico do FGTS Digital.
 
-## 1. Navegador e conexão à sessão autenticada
+## 1. Decisões que o usuário precisa confirmar
+
+### 1.1 Navegador
 
 Confirmar:
 
-- navegador utilizado na operação: Chrome, Edge ou outro Chromium;
-- se podemos iniciar uma instância dedicada do navegador com depuração remota habilitada;
-- se o login/certificado/procuração será realizado manualmente nessa mesma instância antes de iniciar o Python;
-- se haverá mais de uma empresa/procuração na mesma sessão.
+- Google Chrome, Microsoft Edge ou outro Chromium;
+- se podemos usar uma instância dedicada do navegador para a automação;
+- se o login/certificado/procuração será realizado manualmente nessa instância;
+- se a sessão permanecerá aberta enquanto a automação roda.
 
-Objetivo: controlar uma sessão visível sem manipular senha ou certificado.
+Recomendação atual: Chrome/Edge dedicado, visível, com perfil exclusivo da automação e depuração remota habilitada.
+
+### 1.2 Formato exato da TAG
+
+Fornecer um exemplo literal desejado.
+
+Precisamos definir:
+
+- ordem: código + nome ou nome + código;
+- separador exato;
+- espaços;
+- caixa alta/baixa;
+- acentos e caracteres especiais;
+- limite máximo aceito pelo portal;
+- regra se ultrapassar o limite.
+
+Nenhum formato será inferido.
+
+### 1.3 Estratégia para consignado
+
+Ponto crítico: a documentação oficial atual mostra consignado dentro do fluxo da Guia Parametrizada e permite guia combinada com FGTS.
+
+Precisamos confirmar se o objetivo é:
+
+- A) gerar **uma GFD combinada** com FGTS + consignado por CNO quando houver;
+- B) gerar **documentos/guias separados** por decisão operacional, se o portal permitir;
+- C) outra regra.
+
+Também confirmar se o relatório/detalhamento de consignado deve ser salvo separadamente quando o portal disponibilizar documento próprio.
+
+### 1.4 Calendário de dias úteis
+
+Para 08/2026 o vencimento 18/09/2026 decorre apenas do fim de semana e está definido.
+
+Para competências futuras precisamos decidir a fonte usada para feriados/dias não úteis:
+
+- calendário oficial aplicável ao FGTS;
+- eventual tabela local de exceções;
+- comportamento quando houver feriado local que não altere o vencimento federal.
+
+A regra não será baseada apenas em uma biblioteca genérica de feriados sem validação.
 
 ## 2. Planilha de entrada
 
-Precisamos de uma planilha modelo, preferencialmente com dados fictícios ou mascarados, contendo o mesmo layout da planilha real.
+Enviar uma planilha modelo, preferencialmente com dados fictícios/mascarados, mas com a estrutura real.
 
 Confirmar:
 
 - nome da aba;
 - linha do cabeçalho;
-- nome exato da coluna de CNO;
-- nome exato da coluna de código da obra;
-- nome exato da coluna de nome da obra;
-- se existem linhas de totais/cabeçalhos intermediários;
-- se CNO vem com pontuação ou apenas dígitos;
-- se o CNO pode começar com zero;
-- se a mesma CNO pode aparecer mais de uma vez;
-- se haverá coluna com status como `PROCESSAR`, `IGNORAR`, `CONCLUÍDO` etc.
+- nome exato da coluna CNO;
+- nome exato da coluna Código da Obra;
+- nome exato da coluna Nome da Obra;
+- existência de linhas de totais ou cabeçalhos intermediários;
+- se CNO vem pontuado ou apenas em dígitos;
+- quantidade de dígitos esperada;
+- se CNO pode começar com zero;
+- se a mesma CNO pode aparecer legitimamente mais de uma vez;
+- se deseja coluna opcional `PROCESSAR/IGNORAR` ou similar;
+- se deseja que o resultado final seja exportado para uma nova planilha ou arquivo separado.
 
-## 3. Formato exato da TAG
+## 3. Evidência 1 — tela inicial da sessão representada
 
-Ainda não definido e não será inventado.
+Enviar screenshot da tela completa logo após:
 
-Precisamos confirmar:
+1. entrar no FGTS Digital;
+2. selecionar a procuração/empresa correta;
+3. chegar ao ponto em que você normalmente começa o processo.
 
-- ordem: código + nome ou nome + código;
-- separador exato;
-- exemplo real de TAG desejada;
-- uso de espaços;
-- caixa alta/baixa;
-- limite máximo aceito pelo portal;
-- o que fazer quando o texto ultrapassar o limite;
-- tratamento de acentos e caracteres especiais.
+Precisamos identificar:
 
-Exemplo de decisão que o usuário deverá fornecer futuramente, sem assumir que seja o padrão real:
+- onde aparece a empresa/CNPJ representado;
+- elemento confiável para validar que a sessão está na empresa correta;
+- menu/caminho para Gestão de Guias;
+- se existem avisos/banners que podem alterar o layout.
 
-```text
-CODIGO - NOME DA OBRA
-```
+Pode mascarar CNPJ, razão social, CPF e demais dados sensíveis, desde que os rótulos/estrutura permaneçam visíveis.
 
-## 4. Caminho até Emissão de Guia Parametrizada
+## 4. Evidência 2 — acesso à Guia Parametrizada
 
-Precisamos de evidência atual do portal mostrando:
+Enviar screenshot da tela/menu usado para chegar à emissão parametrizada.
 
-- página/tela em que a automação começará depois que o usuário estiver logado;
-- menu ou botão usado para chegar à Guia Parametrizada;
-- como confirmar estruturalmente que a página correta abriu.
+Precisamos saber:
 
-Idealmente enviar screenshot da tela completa e, quando começarmos a implementação, evidência do DOM/HTML do elemento-alvo.
+- sequência manual exata de cliques;
+- se abre nova rota/página/modal;
+- qual texto/título confirma que a tela correta abriu.
 
-## 5. Competência de apuração
+Não precisamos da URL interna neste momento.
 
-A documentação oficial indica campos `Inicial` e `Final` na pesquisa da Guia Parametrizada.
+## 5. Evidência 3 — tela inicial do Passo 1 / pesquisa expandida
 
-Precisamos confirmar na interface atual:
+Enviar:
 
-- formato aceito pelo campo;
-- se o campo permite digitação direta;
-- se existe máscara;
-- se o valor deve ser limpo antes;
-- qual feedback indica que o portal aceitou a competência.
+- screenshot da tela inteira;
+- screenshot após expandir os filtros de pesquisa;
+- descrição dos filtros que você preenche manualmente.
 
-Para o primeiro teste os dois campos deverão resultar em `08/2026`.
+Precisamos identificar:
 
-## 6. Qual filtro de CNO será usado
+- competência inicial/final;
+- tipo de débito;
+- filtro por CNO;
+- botão/ação de pesquisa;
+- indicadores de carregamento.
 
-A documentação atual do FGTS Digital apresenta mais de um contexto que admite CNO, como estabelecimento da remuneração, tomador de serviços e local de trabalho.
+## 6. Evidência 4 — qual filtro de CNO deve ser usado
 
-Portanto, precisamos confirmar **qual deles representa exatamente o filtro que você usa manualmente para separar a obra**.
+A documentação atual admite CNO em diferentes contextos/filtros.
 
-Enviar screenshot com a opção correta indicada.
+Enviar screenshot com o filtro correto destacado e informar:
 
-Não será implementada escolha automática entre esses filtros sem essa confirmação.
+- nome visual do filtro;
+- por que esse é o filtro utilizado no seu procedimento;
+- se sempre será o mesmo para todas as obras.
 
-## 7. Pesquisa e resultado da CNO
+## 7. Evidência 5 — resultado da pesquisa por CNO
 
-Precisamos observar uma pesquisa real ou mascarada para entender:
+Executar manualmente uma pesquisa de teste e enviar screenshot.
 
-- botão exato que executa a pesquisa;
-- mensagem de carregamento;
-- estrutura da tabela de resultados;
-- coluna em que a CNO aparece;
-- como o portal representa CNO sem resultado;
-- como representa mais de um resultado;
+Precisamos observar:
+
+- tabela/listagem retornada;
+- coluna em que aparece a CNO;
+- código/nome da obra se aparecerem;
+- quantidade de trabalhadores/débitos;
 - paginação;
-- como confirmar que a CNO exibida é exatamente a solicitada.
+- estado sem resultado;
+- estado com múltiplos resultados;
+- estado de carregamento;
+- qualquer aviso do portal.
 
-## 8. Seleção dos colaboradores/débitos
+## 8. Evidência 6 — seleção de trabalhadores/débitos FGTS
 
-Este é um ponto crítico.
+Enviar screenshots antes e depois de selecionar os itens.
 
 Precisamos confirmar:
 
-- onde fica o checkbox de seleção;
-- se existe `selecionar todos`;
-- se `selecionar todos` seleciona somente a página visível ou todos os resultados da pesquisa;
-- como identificar a quantidade total de trabalhadores/débitos;
-- se há paginação;
-- se existem registros não selecionáveis;
-- se a seleção inclui FGTS mensal, rescisório ou ambos;
-- qual estado visual/DOM confirma que todos os itens desejados foram selecionados.
+- checkbox/controle de seleção;
+- se existe selecionar todos;
+- se selecionar todos cobre todas as páginas ou somente a página atual;
+- onde aparece a quantidade selecionada;
+- se existem itens desabilitados;
+- se há mistura de mensal/rescisório/outros débitos;
+- como validar que todos os débitos desejados daquela CNO foram realmente incluídos.
 
-A automação não avançará apenas porque um checkbox foi clicado; deverá existir validação da seleção.
+## 9. Evidência 7 — Passo 2 / consignado
 
-## 9. Etapa intermediária de débitos consignados
+Enviar screenshot da tela imediatamente após avançar do FGTS.
 
-A documentação atual indica que o fluxo da Guia Parametrizada pode possuir uma etapa específica de débitos consignados.
+Precisamos observar:
 
-Precisamos confirmar como deve ser tratada no seu processo:
+- mensagem que indica existência ou ausência de consignado;
+- quantidade de trabalhadores, se exibida;
+- se débitos já aparecem incluídos automaticamente;
+- se é necessário pesquisar para visualizá-los;
+- controles para adicionar/excluir;
+- comportamento quando não existe consignado;
+- comportamento quando existe consignado;
+- se o seu objetivo é manter esses valores na mesma guia ou separá-los.
 
-- deve incluir consignado junto com o FGTS daquela CNO;
-- deve excluir/ignorar consignado;
-- deve apenas avançar sem seleção;
-- existem competências/empresas sem essa etapa relevante.
+## 10. Evidência 8 — vencimento, TAG e resumo
 
-Esse comportamento não será presumido.
+Enviar screenshot da etapa em que aparecem:
 
-## 10. Tela de vencimento e TAG
-
-Precisamos de screenshot da etapa em que aparecem:
-
-- vencimento da guia;
+- vencimento;
 - TAG;
-- totais;
-- botão para avançar.
-
-Confirmar:
-
-- se a data é digitável ou escolhida por calendário;
-- formato da data;
-- se o portal altera automaticamente uma data informada;
-- como validar pelo DOM o valor efetivamente recebido;
-- limite e validações do campo TAG.
-
-## 11. Emissão final da guia
-
-A solicitação recebida termina em `Depois de preencher...`, então a parte final do comportamento ainda precisa ser enviada.
-
-Precisamos definir:
-
-- qual é a última ação humana/automática antes da emissão;
-- se a automação deverá clicar em `Emitir Guia`;
-- se haverá uma confirmação/modal final;
-- se deverá baixar PDF;
-- se deverá baixar algum relatório/CSV adicional;
-- pasta de saída;
-- padrão de nome do arquivo;
-- se deve renomear o PDF usando código/nome/CNO;
-- como confirmar que o download terminou;
-- se deverá voltar à tela inicial da Guia Parametrizada para processar a próxima CNO;
-- o que fazer se a guia já tiver sido emitida anteriormente.
-
-## 12. Empresa da sessão
-
-O resumo inicial deve exibir a empresa encontrada no portal quando possível.
+- totais FGTS;
+- totais consignado;
+- total geral;
+- quantidade de trabalhadores/débitos se houver;
+- ação de avançar.
 
 Precisamos confirmar:
 
-- onde o portal mostra Razão Social/CNPJ da empresa representada;
-- se esse dado permanece visível durante todo o fluxo;
-- se deseja apenas exibir ou também comparar com algum CNPJ esperado da planilha/configuração;
-- comportamento se a empresa não puder ser identificada com segurança.
+- formato aceito da data;
+- se permite digitação direta;
+- se o portal recalcula/limita a data;
+- limite e validações da TAG;
+- como reler/confirmar o valor efetivamente recebido pelo campo.
 
-Recomendação de segurança: se houver um CNPJ esperado configurado, bloquear o processamento quando o portal mostrar empresa diferente.
+## 11. Evidência 9 — tela imediatamente anterior à emissão
 
-## 13. Comportamento em situações especiais
+Esta é a tela crítica para a confirmação humana.
 
-Definir antes do primeiro teste amplo:
+Enviar screenshot completo e informar quais dados você costuma revisar manualmente.
 
-- CNO não encontrada;
-- CNO encontrada, mas sem débitos;
-- alguns trabalhadores sem débito selecionável;
+Precisamos identificar:
+
+- CNO/obra, se visível;
+- competência;
+- vencimento;
+- TAG;
+- total FGTS;
+- total consignado;
+- total geral;
+- quantidade de trabalhadores;
+- ação definitiva de emissão;
+- eventual modal de confirmação.
+
+A automação deverá parar aqui no primeiro teste.
+
+## 12. Evidência 10 — pós-emissão
+
+Após emitir manualmente uma guia de teste, enviar screenshots mostrando:
+
+- estado de processamento;
+- estado concluído;
+- número/identificador da guia;
+- situação da guia;
+- botão/link para obter a guia;
+- botões/ícones para detalhamento;
+- PDF/CSV/relatórios disponíveis;
+- como voltar para iniciar nova CNO.
+
+Se existir espera assíncrona, informar aproximadamente como você percebe que terminou (spinner some, status muda, botão aparece etc.).
+
+## 13. Evidência 11 — documentos baixados
+
+Sem enviar documentos reais ao repositório público, informar:
+
+- nomes originais dos arquivos baixados;
+- extensão de cada arquivo;
+- se o navegador baixa diretamente ou abre visualizador;
+- se guia e relatório possuem nomes previsíveis;
+- se o PDF detalhado corresponde ao que você chama de RE;
+- se existe CSV adicional;
+- se consignado gera relatório próprio.
+
+Se necessário, pode enviar ao chat um exemplo totalmente anonimizado/mascarado apenas para análise, sem versioná-lo no GitHub público.
+
+## 14. Casos especiais que precisamos observar ou decidir
+
+Antes do lote, definir comportamento para:
+
+- CNO não localizada;
+- CNO sem débitos FGTS;
+- CNO com FGTS mas sem consignado;
+- CNO com consignado;
+- CNO com consignado vencido;
 - guia já emitida;
-- portal retorna erro;
-- sessão expira;
-- portal exige nova autenticação;
-- página muda de layout;
-- popup/modal inesperado;
-- download falha;
-- usuário intervém manualmente e muda de página;
-- duplicidade de CNO na planilha.
+- pesquisa retorna mais de uma linha compatível;
+- seleção parcial;
+- portal indisponível;
+- sessão expirada;
+- CAPTCHA/MFA/autenticação adicional;
+- modal inesperado;
+- alteração de layout;
+- erro após clicar para emitir;
+- guia emitida mas download falhou;
+- relatório não disponibilizado;
+- intervenção manual que muda de página;
+- navegador fechado acidentalmente;
+- computador/internet interrompidos.
 
-A política padrão proposta é **parar com erro controlado**, nunca pular silenciosamente.
+Política padrão proposta: **parar com erro controlado e nunca continuar silenciosamente**.
 
-## 14. Evidências recomendadas
+## 15. Informações para a interface
 
-Para cada etapa do portal, o ideal é fornecer:
+Confirmar preferências para:
 
-1. screenshot da tela completa;
-2. screenshot aproximado do elemento relevante;
-3. descrição do que você faz manualmente;
-4. quando iniciarmos a codificação, HTML/DOM mínimo do elemento ou informações de acessibilidade obtidas por ferramenta de inspeção.
+- valor inicial das pausas humanas;
+- confirmação antes de cada emissão: habilitada por padrão? (recomendação: SIM);
+- botão Próxima CNO: exigir motivo?;
+- Processada Manualmente: exigir observação?;
+- Reprocessar CNO concluída: exigir dupla confirmação? (recomendação: SIM);
+- pasta raiz padrão de saída ou escolha a cada execução;
+- se deseja som/aviso visual quando entrar em pausa/erro.
 
-Não enviar ao GitHub público:
+## 16. Ordem recomendada de coleta
 
-- certificado;
-- cookie de sessão;
-- token;
+Para começarmos sem retrabalho, fornecer nesta ordem:
+
+1. formato exato da TAG;
+2. decisão FGTS + consignado (mesma guia ou separados);
+3. navegador escolhido;
+4. planilha modelo;
+5. tela inicial da sessão/procuração;
+6. caminho até Guia Parametrizada;
+7. filtros expandidos e filtro correto por CNO;
+8. resultado da CNO;
+9. seleção dos débitos FGTS;
+10. etapa de consignado;
+11. vencimento/TAG;
+12. pré-emissão;
+13. pós-emissão;
+14. downloads/detalhamentos.
+
+## 17. Segurança ao coletar evidências
+
+Não enviar ao repositório público:
+
 - senha;
-- CPF de trabalhador;
+- certificado ou arquivo PFX/P12;
+- cookie/token de sessão;
+- CPF real de trabalhador;
 - planilha operacional real;
-- PDF real de guia;
-- screenshots com dados sensíveis sem mascaramento.
+- guia real;
+- screenshots não mascarados com dados sensíveis.
 
-## 15. Ordem recomendada para o levantamento
-
-Para reduzir retrabalho, coletar as telas nesta ordem:
-
-1. tela inicial após login/procuração;
-2. entrada em Gestão de Guias / Guia Parametrizada;
-3. pesquisa expandida;
-4. filtro correto por CNO;
-5. resultado da pesquisa;
-6. seleção de todos os débitos/trabalhadores;
-7. avanço e eventual etapa de consignado;
-8. vencimento + TAG;
-9. tela imediatamente anterior à emissão;
-10. resultado após emissão/download.
+Screenshots podem ser fornecidos no chat para análise e devem ser mascarados quando contiverem dados pessoais/sigilosos.
