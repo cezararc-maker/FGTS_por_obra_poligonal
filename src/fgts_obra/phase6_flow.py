@@ -51,13 +51,16 @@ def consolidar_downloads(competencia: str, inscricao: str, tag: str) -> dict[str
     Também absorve a antiga subpasta GUIA quando ela existir.
     """
     origem = _pasta_origem_legada(competencia, inscricao)
-    destino = pasta_destino_item(competencia, tag, inscricao)
     movidos: dict[str, str] = {}
 
     if not origem.exists():
         return movidos
 
     arquivos = [p for p in origem.rglob("*") if p.is_file()]
+    if not arquivos:
+        return movidos
+
+    destino = pasta_destino_item(competencia, tag, inscricao)
     for arquivo in arquivos:
         destino_arquivo = destino / arquivo.name
         if destino_arquivo.exists():
@@ -124,6 +127,7 @@ def gerar_zip_competencia(competencia: str) -> Path:
     if temporario.exists():
         temporario.unlink()
 
+    arquivos_adicionados = 0
     try:
         with zipfile.ZipFile(temporario, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as arquivo_zip:
             for pasta_guia in pastas_guias:
@@ -131,12 +135,13 @@ def gerar_zip_competencia(competencia: str) -> Path:
                     [arquivo for arquivo in pasta_guia.rglob("*") if arquivo.is_file()],
                     key=lambda p: str(p.relative_to(pasta)).casefold(),
                 )
-                if not arquivos:
-                    continue
                 for arquivo in arquivos:
                     nome_interno = arquivo.relative_to(pasta)
                     arquivo_zip.write(arquivo, arcname=str(nome_interno))
+                    arquivos_adicionados += 1
 
+        if arquivos_adicionados == 0:
+            raise RuntimeError("Nenhum arquivo de guia/relatório foi encontrado para compactar.")
         if temporario.stat().st_size <= 0:
             raise RuntimeError("O arquivo ZIP foi criado vazio.")
 
