@@ -1,17 +1,21 @@
 # FGTS por Obra / Poligonal
 
-Automação assistida em Python para preparação e emissão controlada de Guias Parametrizadas no FGTS Digital por inscrição/obra.
+Automação assistida em Python para geração de Guias Parametrizadas no FGTS Digital por CNPJ/CNO, com processamento em lote, downloads organizados por TAG, checkpoint local e compactação final da competência.
 
-> Estado atual: **Modo TESTE — Fase 2**. Nesta fase o programa pode navegar até `Gestão de Guias > Emissão de Guia Parametrizada`, preencher competência e filtros, pesquisar **uma única inscrição** e parar no resultado. Ele **não seleciona débitos, não clica em Adicionar à guia, não avança para consignado e não emite guia**.
+## Estado do projeto
 
-## Princípios do projeto
+Versão consolidada para uso mensal: **1.0.0**.
 
-- GitHub é a fonte oficial do código e da documentação.
-- Navegador sempre visível durante a execução.
-- A sessão do FGTS Digital deve estar previamente autenticada pelo usuário.
-- O projeto não obtém, armazena ou manipula senhas ou certificados digitais.
-- Em estado inesperado, a execução para em vez de clicar por aproximação.
-- Dados reais, PDFs, planilhas operacionais, screenshots e logs locais não são versionados.
+O fluxo foi validado no portal real com emissão, download da guia, relatório FGTS, relatório Consignado quando disponível, reinício entre inscrições, lote sequencial e geração do ZIP da competência.
+
+## Princípios
+
+- GitHub é a fonte oficial do código.
+- O Chrome permanece visível durante a execução.
+- A autenticação no FGTS Digital é sempre feita manualmente pelo operador.
+- O programa não armazena senhas, certificados, cookies ou credenciais.
+- Em estado inesperado, a automação interrompe o lote em vez de clicar por aproximação.
+- PDFs, planilhas operacionais, screenshots e checkpoints locais não são versionados.
 
 ## Requisitos
 
@@ -19,132 +23,153 @@ Automação assistida em Python para preparação e emissão controlada de Guias
 - Python 3.11;
 - Google Chrome;
 - Git;
-- acesso ao FGTS Digital realizado manualmente pelo operador.
+- acesso ao FGTS Digital com sessão previamente autenticada.
 
-## Branch da Fase 2
+## Instalação
 
-```text
-feat/modo-teste-fase2
-```
-
-Se o repositório já está no computador:
-
-```powershell
-cd "C:\Users\Cezar.CONTALEX\Desktop\GitHub\FGTS_por_obra_poligonal"
-git fetch origin
-git checkout feat/modo-teste-fase2
-git pull origin feat/modo-teste-fase2
-```
-
-O ambiente `.venv` criado na Fase 1 pode ser reutilizado. Se necessário, execute novamente:
+No PowerShell, dentro do repositório:
 
 ```powershell
 .\scripts\instalar_teste.bat
 ```
 
+O nome histórico do instalador foi mantido para compatibilidade. Ele prepara o `.venv` e as dependências do projeto.
+
 ## Abrir o Chrome dedicado
 
-Execute em um PowerShell separado:
+Em um PowerShell separado:
 
 ```powershell
-cd "C:\Users\Cezar.CONTALEX\Desktop\GitHub\FGTS_por_obra_poligonal"
 .\scripts\abrir_chrome_teste.bat
 ```
 
-No Chrome que abrir:
+No Chrome aberto pelo script:
 
-1. acesse o FGTS Digital manualmente;
-2. faça autenticação/certificado manualmente;
-3. assuma a procuração/empresa manualmente;
+1. acesse o FGTS Digital;
+2. faça a autenticação/certificado manualmente;
+3. assuma a procuração/empresa, quando necessário;
 4. deixe a sessão aberta.
 
-## Abrir a aplicação
-
-Em outro PowerShell:
+## Executar a aplicação
 
 ```powershell
-cd "C:\Users\Cezar.CONTALEX\Desktop\GitHub\FGTS_por_obra_poligonal"
-.\scripts\executar_teste.bat
+.\scripts\executar.bat
 ```
 
-Na aplicação:
+A interface principal permite:
 
-1. selecione a planilha;
-2. confirme competência, vencimento e os 26 registros;
-3. escolha **uma única inscrição**;
-4. opcionalmente clique em `Preparar 1 inscrição` para revisar os dados;
-5. clique em `FASE 2 — Pesquisar inscrição`;
-6. leia a confirmação e só prossiga se a inscrição selecionada estiver correta;
-7. acompanhe o Chrome visível e o log.
+- selecionar e validar a planilha;
+- selecionar uma ou várias inscrições com `Ctrl + clique`;
+- conferir a seleção antes da emissão;
+- gerar guias em sequência;
+- solicitar `Parar após a atual`;
+- impedir repetição de inscrições já concluídas no checkpoint;
+- gerar manualmente o ZIP da competência.
 
-## O que a Fase 2 pode fazer
+## Fluxo operacional
 
-A execução autorizada nesta fase é limitada a:
+Para cada inscrição selecionada, a aplicação:
 
-1. validar que a página ativa pertence ao FGTS Digital;
-2. abrir `Gestão de Guias`;
-3. abrir `Emissão de Guia Parametrizada`;
-4. confirmar a etapa `Selecionar Débitos FGTS`;
-5. preencher `Inicial` e `Final` com a competência da planilha;
-6. conferir e desmarcar `Vencido`;
-7. abrir `Pesquisa Expandida`;
-8. trabalhar somente no contexto `Estabelecimento da Remuneração`;
-9. selecionar `CNPJ` ou `CNO` conforme a planilha;
-10. preencher a inscrição;
-11. clicar em `Pesquisar`;
-12. localizar a tabela de resultado e confirmar a inscrição;
-13. **parar imediatamente**.
+1. abre `Gestão de Guias > Emissão de Guia Parametrizada`;
+2. seleciona a competência inicial e final;
+3. confere o filtro `Vencido`;
+4. abre a pesquisa expandida;
+5. pesquisa CNPJ/CNO em `Estabelecimento da Remuneração`;
+6. seleciona os débitos e adiciona à guia;
+7. avança pelo Consignado sem alterar manualmente a seleção automática do portal;
+8. valida o vencimento;
+9. preenche a TAG exatamente conforme a planilha;
+10. emite a guia;
+11. confirma a emissão pelo número dinâmico e/ou estado final do portal;
+12. salva a própria guia e os relatórios;
+13. reinicia o fluxo para a próxima inscrição.
 
-## Bloqueios obrigatórios da Fase 2
+## Pasta de saída
 
-Não existe código nesta fase para:
-
-- selecionar o checkbox dos débitos;
-- `Adicionar à guia`;
-- `Avançar`;
-- tratar consignado;
-- definir vencimento/TAG no portal;
-- `Emitir Guia`;
-- baixar PDF/CSV.
-
-## Comportamento em erro
-
-Se um elemento não puder ser identificado de forma única ou a página não atingir a pós-condição esperada, a automação para.
-
-Quando possível, uma captura local é salva em:
+Os arquivos são salvos diretamente em:
 
 ```text
-screenshots\fase2_erro_AAAAMMDD_HHMMSS.png
+%USERPROFILE%\Downloads\FGTS_por_obra_poligonal\<MM-AAAA>\<TAG>\
 ```
 
-A pasta `screenshots` está no `.gitignore` e não é enviada ao repositório.
+Exemplo:
 
-## Seletores da interface do portal
+```text
+C:\Users\<usuario>\Downloads\FGTS_por_obra_poligonal\08-2026\
+  89-CRECHE E E. ED INFANTIL 900272665773\
+    <nome original da guia>.pdf
+    <nome original do relatório FGTS>.pdf
+    <nome original do relatório Consignado>.pdf
+```
 
-A implementação usa como base os nomes acessíveis observados no mapeamento manual, entre eles:
+Os nomes originais fornecidos pelo portal são preservados, exceto por substituição de caracteres inválidos para o Windows.
 
-- `Gestão de Guias`;
-- `Emissão de Guia Parametrizada`;
-- `Selecionar Débitos FGTS`;
-- `Inicial`;
-- `Final`;
-- `Vencido`;
-- `Expandir Pesquisa`;
-- `Ocultar Pesquisa Expandida`;
-- `Estabelecimento da Remuneração`;
-- `CNPJ` / `CNO`;
-- `Pesquisar`.
+## Checkpoint
 
-Esses seletores ainda estão sendo **validados por código no portal real**. Se algum deles divergir da estrutura atual, o teste deve parar e o seletor será ajustado com base no erro observado — não por adivinhação.
+O controle persistente fica na pasta da competência:
 
-## Testes automatizados locais
+```text
+%USERPROFILE%\Downloads\FGTS_por_obra_poligonal\<MM-AAAA>\controle_lote.json
+```
+
+Uma inscrição marcada como `CONCLUIDO` não é reemitida automaticamente se for selecionada novamente.
+
+## ZIP da competência
+
+O botão `Gerar ZIP da competência` compacta **somente as subpastas das TAGs existentes dentro da pasta da competência atual**.
+
+Para `08/2026`, o arquivo gerado é:
+
+```text
+Guias de FGTS por Obra 082026.zip
+```
+
+O ZIP não inclui:
+
+- arquivos soltos da pasta geral `Downloads`;
+- `controle_lote.json`;
+- o próprio ZIP;
+- arquivos de outra competência.
+
+Quando todos os registros da planilha constarem como concluídos no checkpoint e o lote terminar sem erros/pendências, a aplicação também tenta gerar o ZIP automaticamente.
+
+## Segurança operacional
+
+- O clique em `Emitir Guia` usa prova de estabilidade antes da ação real.
+- A automação não usa `force=True` para contornar estados instáveis.
+- O lote é interrompido em erro inesperado.
+- `Parar após a atual` termina a inscrição em andamento antes de encerrar o lote.
+- Em falha/atraso de relatório, o operador decide se continua ou permanece na guia atual.
+
+## Testes locais
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Os testes locais existentes cobrem as regras de planilha, normalização de inscrições e vencimento. O fluxo do portal depende do teste controlado no ambiente real.
+Os testes cobrem regras de competência/vencimento, leitura da planilha, organização da pasta de saída e escopo do ZIP.
 
-## Segurança
+## Estrutura relevante
 
-O repositório é público. Não versionar planilhas reais, PDFs de guias, inscrições operacionais, screenshots com dados pessoais, cookies/tokens, certificado digital, arquivos PFX/P12 ou credenciais.
+```text
+src/fgts_obra/
+  app_final.py          # interface principal
+  production_flow.py    # orquestração de produção
+  portal_flow.py        # navegação base no portal
+  phase3_flow.py        # seleção de débitos validada
+  phase4_flow.py        # consignado/vencimento/TAG validados
+  phase5_flow.py        # emissão/download validados
+  phase6_flow.py        # organização e ZIP
+  batch_state.py        # checkpoint
+
+scripts/
+  executar.bat
+  abrir_chrome_teste.bat
+  instalar_teste.bat
+```
+
+Os módulos e scripts das fases de teste foram mantidos para histórico e diagnóstico, mas a entrada oficial da versão consolidada é `scripts\executar.bat`.
+
+## Dados sensíveis
+
+O repositório é público. Nunca versionar planilhas reais, PDFs de guias, screenshots operacionais, logs com dados pessoais, cookies/tokens, certificados PFX/P12 ou credenciais.
