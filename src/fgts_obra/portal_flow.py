@@ -171,11 +171,28 @@ def _desmarcar_vencido(page: Page) -> None:
         itens = _visiveis(candidatos)
     if len(itens) != 1:
         raise PortalFlowError("Controle 'Vencido' não foi identificado de forma única.")
+
     controle = itens[0]
+    if not controle.is_checked():
+        return
+
+    controle_id = controle.get_attribute("id")
+    if controle_id:
+        labels = _visiveis(page.locator(f'label[for="{controle_id}"]'))
+        if len(labels) == 1:
+            labels[0].click()
+        elif len(labels) > 1:
+            raise PortalFlowError("Mais de um label visível foi encontrado para o controle 'Vencido'.")
+        else:
+            label_texto = _unico_visivel(page.get_by_text("Vencido", exact=True), "label Vencido")
+            label_texto.click()
+    else:
+        label_texto = _unico_visivel(page.get_by_text("Vencido", exact=True), "label Vencido")
+        label_texto.click()
+
+    page.wait_for_timeout(250)
     if controle.is_checked():
-        controle.uncheck()
-    if controle.is_checked():
-        raise PortalFlowError("O controle 'Vencido' permaneceu marcado após a tentativa de desmarcação.")
+        raise PortalFlowError("O controle 'Vencido' permaneceu marcado após clicar em seu label visível.")
 
 
 def _expandir_pesquisa(page: Page) -> None:
