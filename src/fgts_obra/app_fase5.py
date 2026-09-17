@@ -33,7 +33,7 @@ class AppFGTSFase5(AppFGTS):
             f"Serviço: {item.servico}\n"
             f"Competência: {self.resultado.competencia}\n"
             f"TAG: {item.tag}\n\n"
-            "Depois da emissão, a automação aguardará o portal liberar os relatórios, "
+            "Depois da emissão, a automação irá capturar e salvar a própria guia, "
             "baixará o PDF do FGTS e, quando houver, o PDF do Consignado, e então clicará em Reiniciar.\n\n"
             "Deseja emitir esta guia?",
         )
@@ -60,17 +60,21 @@ class AppFGTSFase5(AppFGTS):
                 log=self._registrar,
             )
 
+            numero = resultado.numero_guia or "não identificado"
             mensagem = (
                 "Guia emitida e fluxo reiniciado com sucesso.\n\n"
                 f"{resultado.tipo_inscricao}: {resultado.inscricao}\n"
                 f"Competência: {resultado.competencia}\n"
+                f"Número da guia: {numero}\n"
+                f"Guia: {resultado.guia.status}\n"
                 f"Relatório FGTS: {resultado.fgts.status}\n"
                 f"Relatório Consignado: {resultado.consignado.status}\n\n"
+                f"Arquivo da guia: {resultado.guia.caminho or '-'}\n\n"
                 "O portal ficou pronto para a próxima guia."
             )
             messagebox.showinfo("Fase 5 concluída", mensagem)
             self._registrar(
-                f"FASE 5 CONCLUÍDA: FGTS={resultado.fgts.status}; "
+                f"FASE 5 CONCLUÍDA: GUIA={resultado.guia.status}; FGTS={resultado.fgts.status}; "
                 f"CONSIGNADO={resultado.consignado.status}; portal reiniciado."
             )
 
