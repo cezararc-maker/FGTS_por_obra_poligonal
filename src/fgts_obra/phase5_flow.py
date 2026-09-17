@@ -55,6 +55,32 @@ def _botao_unico(page: Page, nome: str) -> Locator:
     raise pf.PortalFlowError(f"Botão '{nome}' não foi localizado de forma única.")
 
 
+def _aguardar_botao_habilitado(page: Page, nome: str, timeout_ms: int = 60_000) -> Locator:
+    limite = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < limite:
+        candidatos = pf._visiveis(page.get_by_role("button", name=nome, exact=True))
+        habilitados = [item for item in candidatos if item.is_enabled()]
+        if len(habilitados) == 1:
+            return habilitados[0]
+        if len(habilitados) > 1:
+            raise pf.PortalFlowError(f"Mais de um botão '{nome}' habilitado ficou visível.")
+        page.wait_for_timeout(300)
+    raise pf.PortalFlowError(f"Botão '{nome}' não ficou habilitado em até {timeout_ms // 1000} segundos.")
+
+
+def _aguardar_etapa_emitir_guia(page: Page, timeout_ms: int = 60_000) -> Locator:
+    limite = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < limite:
+        botoes = pf._visiveis(page.get_by_role("button", name="Emitir Guia", exact=True))
+        habilitados = [item for item in botoes if item.is_enabled()]
+        if len(habilitados) == 1:
+            return habilitados[0]
+        if len(habilitados) > 1:
+            raise pf.PortalFlowError("Mais de um botão 'Emitir Guia' habilitado ficou visível.")
+        page.wait_for_timeout(300)
+    raise pf.PortalFlowError("A etapa final não liberou o botão 'Emitir Guia' em até 60 segundos.")
+
+
 def _aguardar_pos_emissao(page: Page, timeout_ms: int = 90_000) -> None:
     limite = time.monotonic() + timeout_ms / 1000
     while time.monotonic() < limite:
@@ -114,7 +140,6 @@ def _baixar_relatorio(page: Page, botao: Locator, tipo: str, competencia: str, i
     sugerido = _nome_seguro(download.suggested_filename)
     destino = pasta / f"{tipo}_{sugerido}"
 
-    # O evento de download já foi disparado. save_as aguarda a conclusão real do arquivo.
     try:
         download.save_as(str(destino))
     except Exception as exc:
@@ -153,7 +178,7 @@ def executar_fase5(
     tag: str,
     log: LogFn,
 ) -> ResultadoFase5:
-    log("[1/5] Executando o fluxo validado até vencimento/TAG...")
+    log("[1/6] Executando o fluxo validado até vencimento/TAG...")
     executar_fase4(
         page,
         tipo_inscricao=tipo_inscricao,
@@ -164,24 +189,27 @@ def executar_fase5(
         log=log,
     )
 
-    log("[2/5] Emitindo a guia...")
-    emitir = _botao_unico(page, "Emitir Guia")
-    if not emitir.is_enabled():
-        raise pf.PortalFlowError("O botão 'Emitir Guia' está desabilitado.")
+    log("[2/6] Aguardando 'Avançar' em Definir Vencimento...")
+    avancar = _aguardar_botao_habilitado(page, "Avançar", timeout_ms=60_000)
+    avancar.click()
+
+    log("[3/6] Aguardando a etapa Emitir Guia ficar pronta...")
+    emitir = _aguardar_etapa_emitir_guia(page, timeout_ms=60_000)
+
+    log("[4/6] Emitindo a guia...")
     emitir.click()
 
-    log("[3/5] Aguardando o portal concluir a emissão e liberar os relatórios...")
+    log("[5/6] Aguardando o portal concluir a emissão e liberar os relatórios...")
     _aguardar_pos_emissao(page)
 
     botoes = _botoes_relatorio_pdf(page)
     if not botoes:
         raise pf.PortalFlowError("A guia foi emitida, mas nenhum botão 'Imprimir Relatório em PDF' ficou disponível.")
 
-    log("[4/5] Baixando relatório em PDF do FGTS...")
+    log("[6/6] Baixando relatório em PDF do FGTS...")
     fgts = _baixar_relatorio(page, botoes[0], "FGTS", competencia, inscricao)
 
     consignado = ResultadoDownload(tipo="CONSIGNADO", status="NÃO HÁ CONSIGNADO", caminho=None)
-    # Se houver um segundo botão visível, ele corresponde ao relatório do consignado.
     botoes = _botoes_relatorio_pdf(page)
     if len(botoes) >= 2:
         log("Baixando relatório em PDF do Consignado...")
@@ -189,7 +217,7 @@ def executar_fase5(
     else:
         log("Consignado: nenhum relatório em PDF disponível para esta guia.")
 
-    log("[5/5] Reiniciando o fluxo para deixar o portal pronto para a próxima guia...")
+    log("Reiniciando o fluxo para deixar o portal pronto para a próxima guia...")
     _reiniciar(page)
 
     return ResultadoFase5(
