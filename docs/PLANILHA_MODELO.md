@@ -1,6 +1,6 @@
 # Planilha modelo — análise estrutural e decisões confirmadas
 
-Arquivo atualizado analisado no chat: `FGTS_Extrator_Poligonal(1).xlsx`.
+Arquivo atualizado analisado no chat: `FGTS_Extrator_Poligonal(2).xlsx`.
 
 > O arquivo operacional não deve ser versionado neste repositório público. Este documento registra somente a estrutura necessária para o desenvolvimento.
 
@@ -20,8 +20,8 @@ Colunas atuais:
 | A | Codigo | código interno da obra/serviço |
 | B | Tipo Inscrição | determina diretamente `CNPJ` ou `CNO` no portal |
 | C | Servico | descrição do serviço/obra |
-| D | TAG | valor literal a ser informado no campo TAG do FGTS Digital |
-| E | Documento | número da inscrição a pesquisar no portal |
+| D | TAG | valor a ser informado no campo TAG do FGTS Digital |
+| E | Inscrição | número da inscrição (CNPJ ou CNO) a pesquisar no portal |
 | F | FGTS | valor apenas para análise/referência |
 | G | FGTS Aprendiz | valor apenas para análise/referência |
 
@@ -31,37 +31,40 @@ Colunas atuais:
 - 1 linha com tipo `CNPJ`;
 - 25 linhas com tipo `CNO`;
 - nenhuma duplicidade de código;
-- nenhuma duplicidade de documento;
+- nenhuma duplicidade de inscrição;
 - nenhuma duplicidade de TAG;
 - nenhuma linha de dados com campos funcionais vazios;
-- vencimento de conferência corrigido para `18/09/2026`.
+- vencimento de conferência correto em `18/09/2026`.
 
-## Tipo de inscrição
+## Tipo de inscrição e número da inscrição
 
-A decisão está fechada: a automação deve ler a coluna `Tipo Inscrição` e utilizar diretamente seu valor para selecionar `CNPJ` ou `CNO` no portal.
+A decisão está fechada:
 
-Não deve inferir o tipo a partir do texto de `Servico`.
+- a coluna `Tipo Inscrição` informa qual opção deverá ser usada no portal (`CNPJ` ou `CNO`);
+- a coluna `Inscrição` contém o número correspondente que será informado na pesquisa.
 
-Valores aceitos inicialmente: `CNPJ` e `CNO`.
+A automação não deve inferir o tipo a partir do texto de `Servico`.
+
+Valores aceitos inicialmente para `Tipo Inscrição`: `CNPJ` e `CNO`.
 
 ## TAG
 
-A automação deve ler o valor da coluna `TAG` e utilizá-lo literalmente no portal.
+A automação deve ler o valor resultante da coluna `TAG` e utilizá-lo no portal.
 
-Não deve reconstruir a TAG a partir de código e nome da obra. Qualquer futura normalização, truncamento ou remoção de caracteres dependerá de limitação real observada no portal e aprovação do usuário.
+Qualquer futura normalização, truncamento ou remoção de caracteres dependerá de limitação real observada no portal e aprovação do usuário.
 
-## Documento e zeros à esquerda
+## Inscrição e zeros à esquerda
 
-Na versão atualizada, a coluna `Documento` continua armazenada como valor numérico. Existe um CNPJ que visualmente começa com zero, mas a leitura bruta do valor numérico perde esse zero inicial.
+Na versão atualizada, a coluna `Inscrição` continua armazenada como valor numérico. Existe um CNPJ que visualmente começa com zero, mas a leitura bruta do valor numérico perde esse zero inicial.
 
-Isso não impede o desenvolvimento, porque o leitor terá o `Tipo Inscrição` explícito e poderá normalizar o documento antes do uso:
+Isso não impede o desenvolvimento, porque o leitor terá o `Tipo Inscrição` explícito e poderá normalizar a inscrição antes do uso:
 
 - `CNPJ`: converter para somente dígitos e completar à esquerda até 14 dígitos;
 - `CNO`: tratar como identificador textual e validar conforme o formato adotado no projeto.
 
-Mesmo assim, quando possível, é preferível manter a coluna `Documento` como texto no Excel para preservar o identificador exatamente como digitado.
+Mesmo assim, quando possível, é preferível manter a coluna `Inscrição` como texto no Excel para preservar o identificador exatamente como digitado.
 
-A automação nunca deve enviar ao portal um documento sem validar o número de dígitos e o tipo da inscrição.
+A automação nunca deve enviar ao portal uma inscrição sem validar o número de dígitos e o tipo informado.
 
 ## FGTS e FGTS Aprendiz
 
@@ -98,7 +101,7 @@ Codigo
 Tipo Inscrição
 Servico
 TAG
-Documento
+Inscrição
 FGTS
 FGTS Aprendiz
 ```
@@ -114,10 +117,10 @@ A planilha original não deve ser sobrescrita silenciosamente. Estados da execu�
 - `Tipo Inscrição` preenchido e limitado inicialmente a `CNPJ`/`CNO`;
 - serviço preenchido;
 - TAG preenchida;
-- documento preenchido;
-- documento normalizado de acordo com o tipo;
+- inscrição preenchida;
+- inscrição normalizada de acordo com o tipo;
 - CNPJ preservado/normalizado para 14 dígitos, inclusive quando inicia por zero;
-- duplicidade de documento;
+- duplicidade de inscrição;
 - duplicidade ou conflito de linhas;
 - vencimento calculado e eventual divergência com o vencimento de conferência.
 
