@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 import time
 from dataclasses import dataclass
@@ -187,7 +188,6 @@ def _expandir_pesquisa(page: Page) -> None:
         page.wait_for_timeout(350)
         return
 
-    # Se os campos expandidos já estiverem visíveis, consideramos a seção aberta.
     if _visiveis(page.get_by_text("Estabelecimento da Remuneração", exact=True)):
         return
 
@@ -197,86 +197,76 @@ def _expandir_pesquisa(page: Page) -> None:
     raise PortalFlowError("Não foi possível determinar se a Pesquisa Expandida está aberta ou fechada.")
 
 
-def _secao_estabelecimento(page: Page) -> Locator:
-    """Retorna somente o bloco 'Estabelecimento da Remuneração'.
+def _centro(locator: Locator) -> tuple[float, float]:
+    caixa = locator.bounding_box()
+    if not caixa:
+        raise PortalFlowError("Não foi possível obter a posição visual de um elemento da pesquisa expandida.")
+    return (caixa["x"] + caixa["width"] / 2, caixa["y"] + caixa["height"] / 2)
 
-    A tela possui outros blocos com CNPJ/CNO (Tomador e Local de Trabalho), então
-    qualquer ancestral que também contenha esses títulos é rejeitado.
+
+def _mais_proximo(referencia: Locator, candidatos: list[Locator], descricao: str) -> Locator:
+    if not candidatos:
+        raise PortalFlowError(f"Nenhum elemento visível encontrado para {descricao}.")
+
+    rx, ry = _centro(referencia)
+    medidos: list[tuple[float, Locator]] = []
+    for candidato in candidatos:
+        try:
+            cx, cy = _centro(candidato)
+        except PortalFlowError:
+            continue
+        medidos.append((math.hypot(cx - rx, cy - ry), candidato))
+
+    if not medidos:
+        raise PortalFlowError(f"Não foi possível medir a posição dos candidatos de {descricao}.")
+
+    medidos.sort(key=lambda item: item[0])
+    if len(medidos) > 1 and abs(medidos[1][0] - medidos[0][0]) < 4:
+        raise PortalFlowError(f"Dois elementos ficaram praticamente empatados para {descricao}; a automação parou.")
+    return medidos[0][1]
+
+
+def _campo_estabelecimento(page: Page) -> Locator:
+    """Localiza o campo visualmente ligado a 'Estabelecimento da Remuneração'.
+
+    O DOM agrupa os três blocos da linha em um contêiner comum. Por isso, usamos
+    o título visível como âncora e escolhemos o campo de inscrição mais próximo,
+    sem coordenadas absolutas e sem depender da largura da tela.
     """
     titulo = _unico_visivel(
         page.get_by_text("Estabelecimento da Remuneração", exact=True),
         "Estabelecimento da Remuneração",
     )
 
-    candidatos: list[tuple[int, Locator]] = []
-    atual = titulo
-    for _ in range(7):
-        atual = atual.locator("xpath=..")
-        if atual.count() != 1:
-            break
-        try:
-            if not atual.is_visible():
-                continue
-            texto = " ".join(atual.inner_text().split())
-        except Exception:
-            continue
+    campos = _visiveis(page.locator("input[placeholder='Informe CNPJ, CAEPF ou CNO']"))
+    if not campos:
+        campos = _visiveis(page.locator("input[placeholder*='CNPJ'][placeholder*='CAEPF'][placeholder*='CNO']"))
 
-        if "Estabelecimento da Remuneração" not in texto:
-            continue
-        if "CNPJ" not in texto or "CNO" not in texto:
-            continue
-        if "Tomador de Serviços" in texto or "Local de Trabalho Atual" in texto:
-            continue
+    campo = _mais_proximo(titulo, campos, "campo de Estabelecimento da Remuneração")
 
-        campos = _visiveis(
-            atual.locator(
-                "input:enabled:not([type='radio']):not([type='checkbox']):"
-                "not([type='hidden']):not([type='button']):not([type='submit'])"
-            )
-        )
-        # O bloco esperado contém o campo 'Informe CNPJ, CAEPF ou CNO'.
-        if campos:
-            candidatos.append((len(texto), atual))
+    tx, ty = _centro(titulo)
+    cx, cy = _centro(campo)
+    if cy <= ty:
+        raise PortalFlowError("O campo escolhido para Estabelecimento da Remuneração não está abaixo do título esperado.")
+    return campo
 
-    if not candidatos:
+
+def _selecionar_tipo_e_campo(page: Page, tipo: str) -> Locator:
+    campo = _campo_estabelecimento(page)
+
+    opcoes_tipo = _visiveis(page.get_by_text(tipo, exact=True))
+    tipo_texto = _mais_proximo(campo, opcoes_tipo, f"tipo de inscrição {tipo} do Estabelecimento da Remuneração")
+
+    tx, ty = _centro(tipo_texto)
+    cx, cy = _centro(campo)
+    if ty >= cy:
         raise PortalFlowError(
-            "O bloco 'Estabelecimento da Remuneração' não pôde ser delimitado sem misturar "
-            "Tomador de Serviços ou Local de Trabalho Atual."
+            f"A opção {tipo} escolhida não está acima do campo de Estabelecimento da Remuneração."
         )
 
-    candidatos.sort(key=lambda item: item[0])
-    return candidatos[0][1]
-
-
-def _selecionar_tipo_e_campo(secao: Locator, tipo: str) -> Locator:
-    # Dentro do bloco já delimitado deve existir apenas um CNPJ/CNO correspondente.
-    tipo_texto = _unico_visivel(secao.get_by_text(tipo, exact=True), f"tipo de inscrição {tipo}")
     tipo_texto.click()
-
-    # O campo do Estabelecimento da Remuneração possui placeholder próprio observado na tela.
-    campos_placeholder = _visiveis(
-        secao.locator("input[placeholder*='CNPJ'][placeholder*='CAEPF'][placeholder*='CNO']")
-    )
-    if len(campos_placeholder) == 1:
-        return campos_placeholder[0]
-    if len(campos_placeholder) > 1:
-        raise PortalFlowError(
-            "Mais de um campo de inscrição foi encontrado dentro de 'Estabelecimento da Remuneração'."
-        )
-
-    # Fallback ainda restrito ao bloco correto.
-    campos = _visiveis(
-        secao.locator(
-            "input:enabled:not([type='radio']):not([type='checkbox']):not([type='hidden']):"
-            "not([type='button']):not([type='submit'])"
-        )
-    )
-    if len(campos) == 1:
-        return campos[0]
-
-    raise PortalFlowError(
-        "O campo de inscrição do bloco 'Estabelecimento da Remuneração' não foi identificado de forma única."
-    )
+    page.wait_for_timeout(150)
+    return campo
 
 
 def _localizar_tabela_resultado(page: Page) -> Locator | None:
@@ -336,10 +326,9 @@ def executar_pesquisa_segura(
 
     log("[6/8] Abrindo Pesquisa Expandida...")
     _expandir_pesquisa(page)
-    secao = _secao_estabelecimento(page)
 
     log(f"[7/8] Selecionando {tipo_inscricao} em Estabelecimento da Remuneração e preenchendo a inscrição...")
-    campo = _selecionar_tipo_e_campo(secao, tipo_inscricao)
+    campo = _selecionar_tipo_e_campo(page, tipo_inscricao)
     campo.fill(inscricao)
     campo.press("Tab")
     page.wait_for_timeout(250)
