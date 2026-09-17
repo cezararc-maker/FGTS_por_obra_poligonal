@@ -1,292 +1,438 @@
-# Arquitetura inicial
+# Arquitetura aprovada para análise — ainda sem implementação
 
 ## 1. Objetivo
 
-Construir uma automação assistida para emissão de guias individualizadas do FGTS Digital por CNO/obra, mantendo o operador no controle da execução e utilizando uma sessão do navegador previamente autenticada.
+Construir uma automação **assistida** em Python para geração de guias individualizadas no FGTS Digital por CNO/obra, mantendo o operador no controle da execução e utilizando uma sessão de navegador previamente autenticada.
 
-A automação não deve funcionar como um robô cego. Toda ação no portal deve ocorrer dentro de uma máquina de estados conhecida, com validações antes e depois das ações relevantes.
+Princípios obrigatórios:
 
-## 2. Tecnologia proposta
+- navegador sempre visível;
+- nenhuma manipulação de senha, certificado, MFA, CAPTCHA ou credencial;
+- pausas humanas configuráveis;
+- espera preferencial por estados/elementos reais do portal;
+- pausa, retomada e encerramento controlados;
+- nenhuma continuidade silenciosa após falha;
+- rastreabilidade por CNO, obra e etapa;
+- primeira execução obrigatoriamente em modo TESTE com uma única CNO;
+- seletores, URLs e nomes de elementos do portal somente após evidência real.
+
+## 2. Decisão tecnológica
 
 ### Python
 
-Python será a linguagem principal do projeto.
+Python será a linguagem principal.
 
-### Navegador: Playwright conectado a navegador Chromium visível
+### Playwright em vez de Selenium
 
-Proposta inicial: utilizar **Playwright para Python**, conectado via CDP a uma instância visível do Chrome/Chromium iniciada para a automação.
+Recomendação: **Playwright para Python**.
 
-Motivos:
+Motivos principais:
 
-- permite navegador visível;
-- possui mecanismos robustos de espera e inspeção do DOM;
-- possibilita validar conteúdo antes e depois de cada ação;
-- facilita download controlado e captura de screenshot em falhas;
-- pode se conectar a uma sessão de navegador já aberta **desde que essa instância tenha sido iniciada com depuração remota habilitada**.
+- esperas e locators mais adequados a aplicações web dinâmicas;
+- melhor controle de navegação e mudanças de estado;
+- suporte consistente a downloads;
+- inspeção estrutural do DOM antes e depois de ações;
+- screenshots/traces úteis para diagnóstico;
+- possibilidade de conexão a navegador Chromium visível por CDP quando preparado para isso.
 
-Importante: não será assumido que uma janela comum do Chrome, aberta sem depuração remota, possa ser anexada posteriormente de forma confiável. O desenho preferencial é:
+Selenium continua tecnicamente possível, mas não oferece vantagem relevante para este projeto. A prioridade aqui é previsibilidade, validação do estado da página e download controlado.
 
-1. iniciar uma instância dedicada e visível do navegador com um perfil próprio para a automação;
-2. o usuário realiza login, seleção de certificado e procuração manualmente;
-3. somente depois o Python se conecta à sessão autenticada;
-4. o Python nunca recebe senha nem dados do certificado.
+### Observação sobre navegador já autenticado
 
-A escolha definitiva entre Chrome/Edge e a forma de conexão será confirmada com o ambiente real do usuário antes da implementação.
+A estratégia preferida não será tentar anexar a automação a qualquer janela comum do Chrome já aberta. O fluxo planejado é:
 
-## 3. Componentes previstos
+1. iniciar uma instância **dedicada e visível** do Chrome/Edge/Chromium com perfil exclusivo da automação e depuração remota habilitada;
+2. o usuário realiza login, certificado digital e procuração manualmente nessa janela;
+3. somente depois o Python conecta à sessão visível;
+4. a automação nunca recebe nem armazena senha ou certificado.
 
-```text
-src/
-  fgts_obra/
-    app.py                  # entrada da aplicação
-    config.py               # parâmetros locais e defaults seguros
-    models.py               # CNO, obra, competência, execução
-    excel_reader.py         # leitura e validação da planilha
-    calendar_rules.py       # competência e vencimento
-    control_panel.py        # Pausar / Retomar / Abortar
-    execution_state.py      # máquina de estados e checkpoints
-    logging_setup.py        # logs estruturados
-    browser/
-      connection.py         # conexão à sessão visível
-      guards.py             # validações antes/depois das ações
-      fgts_portal.py        # fluxo do portal (somente após levantamento)
-      selectors.py          # seletores confirmados, nunca inferidos
-    workflows/
-      generate_guide.py     # orquestração por CNO/obra
+Chrome moderno exige diretório de perfil não padrão para depuração remota. Portanto, o perfil da automação deverá ser isolado do perfil principal do usuário.
 
-tests/
-  test_calendar_rules.py
-  test_excel_reader.py
-  test_tag_format.py
-  test_execution_state.py
+A conexão por CDP possui fidelidade inferior ao protocolo nativo do Playwright; por isso, todas as funcionalidades críticas serão validadas no teste real antes do processamento em lote.
 
-docs/
-  ARQUITETURA.md
-  INFORMACOES_NECESSARIAS.md
-```
+## 3. Camadas do projeto
 
-Os nomes podem ser ajustados durante a implementação, mas as responsabilidades devem permanecer separadas.
+A implementação futura será separada em seis responsabilidades.
 
-## 4. Modelo de execução
+### A. Interface do operador
 
-### Fase A — preparação
+Responsável por:
 
-1. carregar configuração;
-2. solicitar competência;
-3. mostrar confirmação:
-   - Competência a processar;
-   - Período inicial;
-   - Período final;
-4. só continuar após confirmação manual;
-5. carregar e validar Excel;
-6. calcular vencimento;
-7. conectar à sessão autenticada do navegador;
-8. tentar identificar a empresa visível no portal, quando houver um elemento confiável para isso;
+- selecionar Excel;
+- informar competência;
+- mostrar vencimento calculado;
+- mostrar quantidade de CNOs;
+- mostrar empresa identificada no portal, quando possível;
+- exibir log em tempo real;
+- exibir CNO/obra/etapa atual;
+- PAUSAR;
+- RETOMAR;
+- PARAR/ENCERRAR;
+- PRÓXIMA CNO;
+- REPROCESSAR CNO;
+- marcar PROCESSADA MANUALMENTE;
+- controlar modo TESTE;
+- habilitar/desabilitar confirmação antes da emissão.
+
+Interface inicial recomendada: **Tkinter/ttk**, sem framework web ou interface complexa.
+
+### B. Domínio e validações
+
+Responsável por:
+
+- competência;
+- período inicial/final;
+- cálculo de vencimento;
+- validação da planilha;
+- CNO;
+- código/nome da obra;
+- formatação da TAG;
+- regras de status.
+
+Essa camada não conhecerá o navegador.
+
+### C. Orquestrador da execução
+
+Responsável por:
+
+- fila de CNOs;
+- modo TESTE ou lote;
+- máquina de estados;
+- checkpoints;
+- pausa/retomada;
+- política de erro;
+- reprocessamento;
+- pular CNO por comando explícito;
+- impedir duplicidade de emissão.
+
+### D. Adaptador do FGTS Digital
+
+Responsável exclusivamente pela interação com o portal.
+
+Será dividido conceitualmente por páginas/etapas e usará seletores centralizados. Nenhum seletor será distribuído aleatoriamente pelo código.
+
+O adaptador só será desenvolvido após o levantamento da interface real.
+
+### E. Persistência, auditoria e recuperação
+
+Recomendação:
+
+- **SQLite** (biblioteca padrão `sqlite3`) como estado durável da execução;
+- arquivo `.log` legível em tempo real;
+- registro estruturado por evento;
+- screenshots locais em falha;
+- exportação de resultado final para XLSX/CSV.
+
+SQLite é preferível a usar um Excel aberto como banco de estado durante a execução: reduz risco de bloqueio/corrupção e facilita retomada, reprocessamento e consulta de CNOs.
+
+### F. Gerenciador de artefatos/downloads
+
+Responsável por:
+
+- detectar início/fim de download;
+- classificar documento recebido;
+- renomear de forma segura somente após confirmação do tipo;
+- mover para pasta da CNO;
+- registrar caminho e hash/tamanho quando útil;
+- impedir que um download ausente seja tratado como sucesso.
+
+A estrutura final de pastas só será fixada depois de confirmarmos quais documentos o portal realmente fornece em cada etapa.
+
+## 4. Bibliotecas sugeridas
+
+Dependências principais previstas:
+
+- `playwright`: automação do navegador;
+- `openpyxl`: leitura e exportação de Excel;
+- `pandas`: opcional, apenas se simplificar validações/relatórios;
+- `tkinter`/`ttk`: interface local (já acompanha a instalação padrão do Python em muitos ambientes Windows);
+- `sqlite3`: checkpoint/estado persistente;
+- `logging`: log textual;
+- `pathlib`, `datetime`, `threading`, `queue`, `json`, `hashlib`: biblioteca padrão.
+
+Não é necessário introduzir banco externo, servidor web ou API externa na primeira versão.
+
+## 5. Fluxo antes de qualquer CNO
+
+1. abrir aplicação;
+2. selecionar planilha;
+3. validar cabeçalhos e linhas;
+4. informar competência;
+5. calcular período e vencimento;
+6. mostrar primeira confirmação de competência/período;
+7. conectar à sessão autenticada visível;
+8. identificar empresa no portal se houver elemento confiável;
 9. mostrar resumo final:
    - competência;
-   - vencimento calculado;
-   - quantidade de CNOs válidos;
-   - empresa encontrada quando possível;
-10. aguardar clique em SIM.
+   - vencimento;
+   - quantidade de CNOs válidas;
+   - empresa encontrada;
+   - modo TESTE/lote;
+10. exigir confirmação SIM antes de qualquer processamento.
 
-Nenhuma CNO é processada antes das duas confirmações.
+## 6. Validação da planilha
 
-### Fase B — processamento de cada CNO
+A leitura deverá preservar CNO e código como texto.
 
-Cada obra será processada isoladamente. O estado mínimo registrado deverá conter:
-
-- índice atual;
-- CNO;
-- código da obra;
-- nome da obra;
-- competência;
-- etapa atual;
-- data/hora;
-- resultado da última validação;
-- status: aguardando / executando / pausado / concluído / erro / abortado.
-
-O fluxo específico do portal só será implementado após confirmar elementos reais da interface.
-
-## 5. Máquina de estados
-
-Estados funcionais sugeridos:
-
-```text
-PREPARANDO
-AGUARDANDO_CONFIRMACAO_COMPETENCIA
-CARREGANDO_PLANILHA
-VALIDANDO_PLANILHA
-CONECTANDO_NAVEGADOR
-AGUARDANDO_CONFIRMACAO_RESUMO
-
-CNO_INICIANDO
-CNO_ACESSANDO_GUIA_PARAMETRIZADA
-CNO_CONFIGURANDO_FILTROS
-CNO_PESQUISANDO
-CNO_VALIDANDO_RESULTADO
-CNO_SELECIONANDO_DEBITOS
-CNO_AVANCANDO
-CNO_DEFININDO_VENCIMENTO_TAG
-CNO_VALIDANDO_VENCIMENTO_TAG
-CNO_EMITINDO_GUIA
-CNO_VALIDANDO_EMISSAO
-CNO_FINALIZADO
-
-PAUSADO
-ERRO_CONTROLADO
-ABORTADO
-FINALIZADO
-```
-
-Os nomes das etapas do portal são conceituais neste momento e **não implicam seletores ou comportamento técnico já conhecidos**.
-
-## 6. Pausar, retomar e abortar
-
-Será utilizado um painel de controle local, preferencialmente em Tkinter, com pelo menos:
-
-- `PAUSAR`;
-- `RETOMAR`;
-- `ABORTAR`;
-- exibição de CNO/obra/etapa atual;
-- última mensagem de status.
-
-A pausa será cooperativa e de alta frequência: todas as ações do navegador passarão por um wrapper que verifica os sinais de pausa/aborto antes e depois de ações e durante esperas longas em intervalos curtos.
-
-Limitação técnica importante: uma chamada já entregue ao navegador não pode ser magicamente desfeita no meio. Por isso, o projeto evitará operações longas monolíticas e usará esperas curtas e verificáveis.
-
-Ao retomar após intervenção manual, o sistema **não continua simplesmente da próxima linha de código**. Primeiro executa uma validação do estado atual da página. Se a página não estiver no estado esperado, entra em `ERRO_CONTROLADO` e pede nova intervenção.
-
-## 7. Pausas configuráveis
-
-Configurações previstas, sem hardcode no fluxo:
-
-```toml
-[delays]
-before_action = 0.8
-after_action = 1.2
-after_search = 2.0
-after_navigation = 2.0
-```
-
-Os valores acima são apenas exemplos de estrutura e não serão adotados como defaults definitivos antes do teste assistido.
-
-## 8. Validações obrigatórias
-
-Antes de qualquer ação irreversível, deverá existir uma condição verificável.
-
-Exemplos conceituais:
-
-- confirmar que a tela atual é a tela esperada;
-- confirmar que a competência exibida é a competência solicitada;
-- confirmar que o CNO encontrado é exatamente o CNO da planilha;
-- confirmar a quantidade/estado dos débitos selecionados;
-- confirmar que TAG foi preenchida com o valor esperado;
-- confirmar que vencimento exibido é exatamente o calculado;
-- confirmar que a emissão foi concluída antes de marcar a obra como finalizada.
-
-Se qualquer validação falhar, nenhuma etapa seguinte é executada automaticamente.
-
-## 9. Logs e evidências
-
-Cada execução deverá gerar logs estruturados localmente, sem versionamento no GitHub.
-
-Campos mínimos:
-
-- `run_id`;
-- timestamp;
-- competência;
-- CNO;
-- código da obra;
-- nome da obra;
-- etapa;
-- ação;
-- resultado;
-- mensagem;
-- exceção, quando houver.
-
-Em falha:
-
-1. pausar o fluxo;
-2. registrar etapa e CNO;
-3. capturar screenshot local;
-4. preservar checkpoint;
-5. mostrar mensagem clara ao operador.
-
-## 10. Checkpoint e recuperação
-
-Será mantido um checkpoint local por execução. O objetivo é permitir identificar com precisão:
-
-- quais CNOs concluíram;
-- qual CNO estava sendo processado;
-- em qual etapa parou;
-- se a retomada automática é segura ou se exige revalidação/manual.
-
-Por segurança, uma nova execução não deverá presumir que uma guia foi emitida apenas porque a etapa anterior foi iniciada. A conclusão só será registrada após validação positiva da emissão.
-
-## 11. Leitura do Excel
-
-A planilha será lida com `openpyxl` ou `pandas` + `openpyxl`, mantendo CNO como texto para evitar perda de zeros e alterações de formatação.
-
-Validações previstas:
+Bloqueios antes do início:
 
 - CNO vazio;
-- CNO duplicado;
-- código de obra vazio;
-- nome de obra vazio;
-- linhas inteiramente vazias;
-- CNO com formato inesperado;
-- conflito entre obras duplicadas.
+- CNO com formato inválido;
+- duplicidade não autorizada;
+- código da obra vazio;
+- nome da obra vazio;
+- cabeçalhos ausentes;
+- linhas conflitantes para a mesma CNO.
 
-A aba, linha de cabeçalho e nomes exatos das colunas ainda precisam ser confirmados.
+O operador deverá receber uma lista de inconsistências e a execução não começará enquanto existirem erros bloqueantes.
 
-## 12. Competência e vencimento
+Ainda precisamos confirmar a regra exata de validade/formatação do CNO e se a planilha poderá possuir uma coluna de controle.
 
-Para débitos mensais, a regra base confirmada é:
+## 7. Competência e vencimento
 
-- vencimento no dia 20 do mês subsequente à competência;
-- se o dia 20 não for útil, antecipar para o dia útil imediatamente anterior.
+A competência será parâmetro de execução e nunca hardcoded.
 
-Para `08/2026`:
+Para o primeiro teste:
 
+- competência: `08/2026`;
+- período inicial: `08/2026`;
+- período final: `08/2026`;
 - data-base: `20/09/2026`;
-- domingo;
 - vencimento esperado: `18/09/2026`.
 
-A implementação deverá considerar calendário de dias não úteis aplicável ao recolhimento do FGTS. A fonte/calendário utilizada será explicitamente documentada e testada.
+O mecanismo de calendário deverá ser isolado e testável. Para competências futuras, será necessário definir explicitamente qual calendário oficial de dias não úteis deverá ser usado além de fins de semana.
 
-O projeto não deve aplicar a regra mensal indiscriminadamente a débitos rescisórios ou situações especiais; esses casos exigem regra própria.
+## 8. TAG
 
-## 13. TAG
+A TAG será função isolada e testável, mas **não será implementada até o usuário definir o formato exato**.
 
-A função de TAG será isolada e testável:
+Precisamos saber:
 
-```text
-format_tag(codigo_obra, nome_obra) -> str
-```
-
-Nenhum padrão será implementado até o usuário informar:
-
-- ordem dos campos;
+- ordem de código/nome;
 - separador;
 - espaços;
 - caixa alta/baixa;
-- limite de caracteres;
-- tratamento quando o nome ultrapassar o limite;
-- caracteres que devem ser removidos ou preservados.
+- limite máximo aceito;
+- regra de truncamento;
+- acentos/caracteres especiais.
 
-## 14. Segurança de dados
+## 9. Máquina de estados por CNO
 
-O repositório é público neste momento. Portanto:
+Estados conceituais previstos:
 
-- não versionar planilha real;
-- não versionar CNOs reais;
-- não versionar CNPJ/CPF reais;
-- não versionar screenshots do portal com dados identificáveis;
-- não versionar cookies, perfis do navegador, certificados, arquivos `.pfx/.p12`, tokens ou segredos;
-- não versionar PDFs das guias reais.
+- AGUARDANDO;
+- INICIANDO_CNO;
+- ACESSANDO_GUIA_PARAMETRIZADA;
+- CONFIGURANDO_FILTROS;
+- PESQUISANDO_CNO;
+- VALIDANDO_CNO;
+- SELECIONANDO_DEBITOS_FGTS;
+- VALIDANDO_SELECAO_FGTS;
+- TRATANDO_CONSIGNADO;
+- DEFININDO_VENCIMENTO_TAG;
+- VALIDANDO_RESUMO;
+- AGUARDANDO_CONFIRMACAO_EMISSAO;
+- EMITINDO;
+- AGUARDANDO_PROCESSAMENTO;
+- VALIDANDO_GUIA_GERADA;
+- OBTENDO_GUIA;
+- OBTENDO_DETALHAMENTOS;
+- CONCLUIDO;
+- PAUSADO;
+- ERRO_CONTROLADO;
+- CANCELADO;
+- PROCESSADO_MANUALMENTE.
 
-Caso seja necessário guardar exemplos no repositório, eles deverão ser totalmente fictícios.
+Os nomes são internos e não pressupõem textos ou botões reais do portal.
 
-## 15. Critério para começar a automação do portal
+## 10. Pausar, retomar, parar, próxima CNO e reprocessar
 
-O módulo `browser/fgts_portal.py` só deverá ser implementado depois de obter evidência suficiente para cada etapa: tela, elemento-alvo, estado esperado antes da ação e estado verificável depois da ação.
+A interface rodará separada da thread de automação.
+
+### PAUSAR
+
+Sinal cooperativo verificado:
+
+- antes de cada ação;
+- depois de cada ação;
+- durante esperas longas em pequenos intervalos;
+- antes de qualquer operação irreversível.
+
+Uma ação já enviada ao navegador não pode ser desfeita magicamente; por isso o fluxo será composto por passos curtos e verificáveis.
+
+### RETOMAR
+
+Após intervenção manual, a automação não continuará cegamente. Antes de retomar deverá executar uma **reconciliação de estado**:
+
+- página/etapa atual;
+- CNO atual;
+- competência;
+- seleção existente;
+- vencimento/TAG quando aplicável;
+- presença de modal/erro/autenticação.
+
+Se não conseguir provar que o estado atual é compatível, permanecerá pausada/erro controlado.
+
+### PARAR/ENCERRAR
+
+Finaliza em ponto seguro, grava checkpoint e não inicia nova CNO.
+
+### PRÓXIMA CNO
+
+Não será um simples `continue`. A CNO atual receberá status explícito como `PULADA_PELO_OPERADOR`, com motivo/data. Só então a fila avança.
+
+### REPROCESSAR CNO
+
+Só será permitido após consultar o estado persistido e verificar risco de emissão duplicada. CNO com guia confirmadamente emitida não deverá ser reemitida automaticamente sem decisão explícita do operador.
+
+### PROCESSADA MANUALMENTE
+
+Status terminal explícito, com data/hora e observação opcional. Essa CNO deixa de entrar na fila automática daquela execução.
+
+## 11. Velocidade e esperas
+
+A estratégia será híbrida:
+
+1. aguardar condição real do portal;
+2. quando a condição for satisfeita, aplicar pequena pausa humana configurável;
+3. só então executar a próxima ação.
+
+Parâmetros previstos:
+
+- tempo entre ações;
+- tempo após pesquisa;
+- tempo após avançar/navegação;
+- tempo após geração;
+- timeout máximo por condição;
+- intervalo de verificação durante esperas.
+
+Não haverá sequência de cliques em alta velocidade.
+
+## 12. Política de erro e guardas
+
+Toda etapa crítica terá **pré-condição**, **ação** e **pós-condição**.
+
+Exemplos:
+
+- antes de pesquisar: provar que estamos na tela correta;
+- depois de pesquisar: provar que a CNO retornada é exatamente a esperada;
+- depois de selecionar: provar quantidade/estado da seleção;
+- depois de preencher vencimento: reler o valor do campo;
+- antes de emitir: validar CNO, obra, competência, vencimento, TAG e totais disponíveis;
+- depois de emitir: provar existência/número/situação da guia antes de marcar como gerada.
+
+Falha em qualquer guarda:
+
+1. interromper ações automáticas;
+2. registrar CNO + etapa + mensagem;
+3. capturar screenshot local;
+4. salvar checkpoint;
+5. mostrar erro ao operador;
+6. aguardar decisão explícita.
+
+CAPTCHA, MFA, nova autenticação, aviso inesperado ou mudança estrutural entram nessa política de pausa.
+
+## 13. Confirmação antes da emissão
+
+Configuração: `confirmar_antes_de_emitir = habilitado/desabilitado`.
+
+Quando habilitada, a automação para antes da ação definitiva e mostra:
+
+- CNO;
+- código/nome da obra;
+- competência;
+- vencimento;
+- quantidade de trabalhadores/débitos selecionados;
+- valores/totais que possam ser validados com segurança;
+- TAG.
+
+Ações:
+
+- GERAR;
+- PAUSAR;
+- CANCELAR.
+
+Mesmo com confirmação desabilitada, todas as validações estruturais continuam obrigatórias.
+
+## 14. Consignado — ponto a decidir antes da implementação
+
+A documentação oficial atual do FGTS Digital descreve a Guia Parametrizada em quatro passos, incluindo **Selecionar Débitos Consignados** antes de Definir Vencimento/Emitir Guia. Débitos de consignado vinculados aos trabalhadores com FGTS incluído podem ser recuperados/adicionados à mesma guia.
+
+Portanto, precisamos decidir o objetivo operacional real:
+
+- **Modelo A — guia combinada:** FGTS + consignado da CNO na mesma GFD, quando houver;
+- **Modelo B — guias separadas por decisão operacional:** emitir FGTS e consignado separadamente, se o portal permitir e isso for desejado;
+- **Modelo C — outra regra específica** a ser descrita.
+
+Não será implementada a premissa de duas guias sem essa confirmação.
+
+Quando não houver consignado, o resultado será `SEM_CONSIGNADO`, nunca erro.
+
+## 15. Registro persistente por CNO
+
+Campos mínimos:
+
+- run_id;
+- CNO;
+- código da obra;
+- nome da obra;
+- competência;
+- vencimento;
+- status FGTS;
+- status consignado;
+- status detalhamento FGTS;
+- status detalhamento consignado, se aplicável;
+- número/identificador da guia quando disponível;
+- quantidade de trabalhadores/débitos;
+- etapa atual;
+- status geral;
+- erro;
+- data/hora início/fim;
+- caminho dos arquivos gerados;
+- observação de intervenção manual.
+
+A aplicação deverá conseguir reiniciar e reconstruir a posição a partir desses dados.
+
+## 16. Downloads e detalhamentos
+
+A documentação oficial indica que o FGTS Digital disponibiliza detalhamentos/relatórios e, em determinadas telas, opções em PDF e CSV.
+
+Tratamento previsto:
+
+1. só iniciar captura de download depois de identificar o controle real da interface;
+2. aguardar evento real de download;
+3. verificar que o arquivo foi concluído e possui conteúdo;
+4. classificar o tipo de documento;
+5. renomear/mover para pasta segura;
+6. registrar o caminho no estado da CNO;
+7. se a guia for emitida mas o relatório não puder ser obtido, registrar estados diferentes em vez de marcar tudo como concluído.
+
+Estrutura de pastas sugerida, **ainda não definitiva**:
+
+`FGTS_DIGITAL/<AAAA-MM>/<CODIGO - OBRA>/FGTS`, `CONSIGNADO`, `RE`.
+
+A estrutura será confirmada após observarmos os downloads reais e se FGTS/consignado geram um ou dois documentos/guias.
+
+## 17. Modo TESTE obrigatório
+
+Primeiro ensaio operacional:
+
+1. usar planilha modelo com 1 ou mais registros, mas configurar `modo_teste`;
+2. validar toda a planilha;
+3. calcular competência/vencimento;
+4. conectar ao navegador visível já autenticado;
+5. processar somente a primeira CNO selecionada para teste;
+6. navegar passo a passo com pausas ampliadas;
+7. parar obrigatoriamente antes da emissão definitiva;
+8. mostrar resumo de pré-emissão;
+9. operador compara visualmente;
+10. somente com comando explícito poderá emitir a guia de teste;
+11. validar guia e downloads;
+12. encerrar o teste sem iniciar a próxima CNO;
+13. revisar logs, screenshots e estado persistido antes de habilitar lote.
+
+## 18. Critério para iniciar código de portal
+
+Somente após aprovação desta arquitetura e coleta mínima das evidências listadas em `docs/INFORMACOES_NECESSARIAS.md`.
+
+Até lá, não serão criados seletores, URLs internas, automações de clique ou suposições de interface.
