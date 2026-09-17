@@ -7,14 +7,15 @@ from tkinter import filedialog, messagebox, ttk
 from .browser_connection import BrowserSession
 from .excel_reader import ler_planilha
 from .models import ResultadoPlanilha
+from .portal_flow import PortalFlowError, executar_pesquisa_segura, salvar_screenshot_erro
 
 
 class AppFGTS(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("FGTS por Obra/Poligonal — Modo TESTE Fase 1")
-        self.geometry("1180x720")
-        self.minsize(980, 620)
+        self.title("FGTS por Obra/Poligonal — Modo TESTE Fase 2")
+        self.geometry("1180x760")
+        self.minsize(980, 650)
 
         self.resultado: ResultadoPlanilha | None = None
         self.browser_session: BrowserSession | None = None
@@ -68,7 +69,7 @@ class AppFGTS(tk.Tk):
 
         self.btn_preparar = ttk.Button(
             acoes,
-            text="Preparar teste de 1 inscrição",
+            text="Preparar 1 inscrição",
             command=self._preparar_teste,
             state="disabled",
         )
@@ -82,11 +83,19 @@ class AppFGTS(tk.Tk):
         )
         self.btn_chrome.pack(side="left", padx=8)
 
+        self.btn_fase2 = ttk.Button(
+            acoes,
+            text="FASE 2 — Pesquisar inscrição",
+            command=self._executar_fase2,
+            state="disabled",
+        )
+        self.btn_fase2.pack(side="left", padx=8)
+
         ttk.Label(acoes, textvariable=self.status_var).pack(side="left", padx=12)
 
         log_frame = ttk.LabelFrame(self, text="Log do teste", padding=8)
         log_frame.pack(fill="both", padx=10, pady=(0, 10))
-        self.log = tk.Text(log_frame, height=8, wrap="word", state="disabled")
+        self.log = tk.Text(log_frame, height=10, wrap="word", state="disabled")
         self.log.pack(fill="both", expand=True)
 
     def _registrar(self, mensagem: str) -> None:
@@ -112,11 +121,12 @@ class AppFGTS(tk.Tk):
         self._limpar_tabela()
         self.btn_preparar.configure(state="disabled")
         self.btn_chrome.configure(state="disabled")
+        self.btn_fase2.configure(state="disabled")
         self._registrar(f"Validando planilha: {caminho.name}")
 
         try:
             resultado = ler_planilha(caminho)
-        except Exception as exc:  # proteção da interface para erros inesperados de arquivo
+        except Exception as exc:
             self.resultado = None
             messagebox.showerror("Erro ao ler planilha", str(exc))
             self._registrar(f"ERRO: {exc}")
@@ -168,6 +178,7 @@ class AppFGTS(tk.Tk):
 
         self.btn_preparar.configure(state="normal")
         self.btn_chrome.configure(state="normal")
+        self.btn_fase2.configure(state="normal")
         self._registrar(f"Planilha validada com sucesso: {len(resultado.itens)} registro(s).")
 
     def _limpar_tabela(self) -> None:
@@ -193,7 +204,7 @@ class AppFGTS(tk.Tk):
             return
 
         resumo = (
-            "MODO TESTE — NENHUMA GUIA SERÁ EMITIDA NESTA FASE\n\n"
+            "MODO TESTE — FASE 2\n\n"
             f"Tipo: {item.tipo_inscricao}\n"
             f"Inscrição: {item.inscricao}\n"
             f"Código: {item.codigo}\n"
@@ -201,7 +212,8 @@ class AppFGTS(tk.Tk):
             f"TAG: {item.tag}\n"
             f"Competência: {self.resultado.competencia}\n"
             f"Vencimento calculado: {self.resultado.vencimento_calculado:%d/%m/%Y}\n\n"
-            "Próximo passo do teste: conectar ao Chrome visível e somente confirmar que a sessão pode ser lida."
+            "A Fase 2 pode navegar, preencher filtros e clicar em Pesquisar.\n"
+            "Ela NÃO seleciona débitos, NÃO adiciona à guia e NÃO emite guia."
         )
         messagebox.showinfo("Inscrição preparada para teste", resumo)
         self._registrar(
@@ -225,18 +237,86 @@ class AppFGTS(tk.Tk):
             self._registrar(f"Falha de conexão com Chrome: {exc}")
             return
 
-        self.browser_session = sessao
         mensagem = (
             "Conexão com Chrome realizada com sucesso.\n\n"
             f"Páginas abertas: {info.paginas_abertas}\n"
             f"Título atual: {info.titulo}\n"
             f"URL atual: {info.url}\n\n"
-            "Nenhum clique ou alteração foi executado pelo programa."
+            "Nenhum clique ou alteração foi executado neste teste de conexão."
         )
         messagebox.showinfo("Chrome conectado", mensagem)
         self._registrar(f"Chrome conectado. Página atual: {info.titulo or '(sem título)'}")
         sessao.fechar_conexao()
-        self.browser_session = None
+
+    def _executar_fase2(self) -> None:
+        if self.resultado is None or not self.resultado.valida:
+            return
+        item = self._item_selecionado()
+        if item is None:
+            messagebox.showwarning("Seleção", "Selecione uma inscrição na tabela.")
+            return
+
+        confirmar = messagebox.askyesno(
+            "Confirmar Fase 2",
+            "A automação irá operar UMA inscrição no Chrome visível.\n\n"
+            f"{item.tipo_inscricao}: {item.inscricao}\n"
+            f"Serviço: {item.servico}\n"
+            f"Competência: {self.resultado.competencia}\n\n"
+            "Ações permitidas: abrir Gestão de Guias, Guia Parametrizada, preencher competência/filtros, "
+            "preencher a inscrição e clicar em Pesquisar.\n\n"
+            "Ações BLOQUEADAS nesta fase: selecionar débitos, Adicionar à guia, Avançar e Emitir Guia.\n\n"
+            "Deseja continuar?",
+        )
+        if not confirmar:
+            self._registrar("Fase 2 cancelada pelo operador antes de qualquer ação no portal.")
+            return
+
+        self.btn_fase2.configure(state="disabled")
+        sessao = BrowserSession()
+        self.browser_session = sessao
+        try:
+            self._registrar("FASE 2 INICIADA — conectando ao Chrome dedicado...")
+            info = sessao.conectar()
+            self._registrar(f"Chrome conectado: {info.titulo} | {info.url}")
+            resultado = executar_pesquisa_segura(
+                sessao.page,
+                tipo_inscricao=item.tipo_inscricao,
+                inscricao=item.inscricao,
+                competencia=self.resultado.competencia,
+                log=self._registrar,
+            )
+            messagebox.showinfo(
+                "Fase 2 concluída",
+                "Pesquisa concluída com segurança.\n\n"
+                f"{resultado.tipo_inscricao}: {resultado.inscricao}\n"
+                f"Competência: {resultado.competencia}\n"
+                f"Linhas visíveis no resultado: {resultado.linhas_resultado}\n\n"
+                "A automação PAROU no resultado da pesquisa.\n"
+                "Nenhum débito foi selecionado e nenhuma guia foi alterada ou emitida.",
+            )
+        except Exception as exc:
+            screenshot = None
+            try:
+                screenshot = salvar_screenshot_erro(sessao.page, Path.cwd())
+            except Exception:
+                pass
+            detalhe = str(exc)
+            if screenshot:
+                detalhe += f"\n\nScreenshot local: {screenshot}"
+            titulo = "Fase 2 interrompida"
+            if not isinstance(exc, PortalFlowError):
+                titulo = "Erro inesperado na Fase 2"
+            messagebox.showerror(
+                titulo,
+                "A automação foi interrompida e NÃO continuará automaticamente.\n\n" + detalhe,
+            )
+            self._registrar(f"FASE 2 INTERROMPIDA: {exc}")
+            if screenshot:
+                self._registrar(f"Screenshot local do erro: {screenshot}")
+        finally:
+            sessao.fechar_conexao()
+            self.browser_session = None
+            self.btn_fase2.configure(state="normal")
 
 
 def main() -> None:
