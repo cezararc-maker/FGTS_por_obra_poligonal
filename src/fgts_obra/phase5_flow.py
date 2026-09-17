@@ -91,47 +91,105 @@ def _aguardar_botao_habilitado(page: Page, nome: str, timeout_ms: int = 60_000) 
     raise pf.PortalFlowError(f"Botão '{nome}' não ficou habilitado em até {timeout_ms // 1000} segundos.")
 
 
-def _aguardar_etapa_emitir_guia(page: Page, timeout_ms: int = 90_000) -> Locator:
+def _localizar_botao_emitir(page: Page) -> Locator | None:
+    candidatos = pf._visiveis(page.locator("button.br-button.primary.wizard-btn"))
+    emitir: list[Locator] = []
+    for item in candidatos:
+        try:
+            if item.inner_text().strip() == "Emitir Guia" and item.is_enabled():
+                emitir.append(item)
+        except Exception:
+            pass
+    if len(emitir) > 1:
+        raise pf.PortalFlowError("Mais de um botão real 'Emitir Guia' habilitado ficou visível.")
+    return emitir[0] if len(emitir) == 1 else None
+
+
+def _aguardar_etapa_emitir_guia(page: Page, timeout_ms: int = 90_000) -> None:
+    """Confirma que a etapa existe, sem reutilizar um locator antigo após rerenders."""
     limite = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < limite:
+        if _overlay_carregamento_visivel(page):
+            page.wait_for_timeout(250)
+            continue
+        if _localizar_botao_emitir(page) is not None:
+            _aguardar_sem_overlay(page, timeout_ms=10_000)
+            return
+        page.wait_for_timeout(300)
+    raise pf.PortalFlowError(
+        "A etapa Emitir Guia não ficou pronta em até 90 segundos. "
+        "O botão pode estar visível, mas a tela ainda não estabilizou."
+    )
+
+
+def _clicar_emitir_guia_seguro(page: Page, timeout_ms: int = 90_000) -> None:
+    """Clica em Emitir Guia somente após estabilidade real do layout.
+
+    O FGTS Digital pode continuar recalculando a altura das tabelas mesmo sem overlay.
+    Por isso não guardamos um Locator entre a espera e o clique. A cada tentativa o
+    botão é relocalizado, centralizado no viewport e submetido a um click(trial=True),
+    que testa exatamente as mesmas condições de um clique real sem disparar a ação.
+    Somente após duas provas consecutivas de actionability executamos um único clique.
+    """
+    limite = time.monotonic() + timeout_ms / 1000
+    provas_consecutivas = 0
 
     while time.monotonic() < limite:
-        candidatos = pf._visiveis(page.locator("button.br-button.primary.wizard-btn"))
-        emitir: list[Locator] = []
-        for item in candidatos:
-            try:
-                if item.inner_text().strip() == "Emitir Guia" and item.is_enabled():
-                    emitir.append(item)
-            except Exception:
-                pass
+        if _overlay_carregamento_visivel(page):
+            provas_consecutivas = 0
+            page.wait_for_timeout(250)
+            continue
 
-        if len(emitir) > 1:
-            raise pf.PortalFlowError("Mais de um botão real 'Emitir Guia' habilitado ficou visível.")
+        botao = _localizar_botao_emitir(page)
+        if botao is None:
+            provas_consecutivas = 0
+            page.wait_for_timeout(250)
+            continue
 
-        if len(emitir) == 1 and not _overlay_carregamento_visivel(page):
-            _aguardar_sem_overlay(page, timeout_ms=10_000)
-            return emitir[0]
+        try:
+            # Centraliza explicitamente o botão. scroll_into_view_if_needed pode deixá-lo
+            # no limite inferior do viewport enquanto o Angular ainda altera o layout.
+            botao.evaluate("el => el.scrollIntoView({block: 'center', inline: 'nearest', behavior: 'instant'})")
+            page.wait_for_timeout(300)
 
-        page.wait_for_timeout(300)
+            # Trial usa as regras reais do Playwright (visível, estável, recebendo eventos,
+            # dentro do viewport) sem efetuar o clique.
+            botao.click(trial=True, timeout=1_500)
+            provas_consecutivas += 1
+
+            if provas_consecutivas < 2:
+                page.wait_for_timeout(350)
+                continue
+
+            # Relocaliza novamente imediatamente antes do clique real para não reutilizar
+            # referência de um DOM que possa ter sido reconstruído.
+            botao = _localizar_botao_emitir(page)
+            if botao is None or _overlay_carregamento_visivel(page):
+                provas_consecutivas = 0
+                continue
+
+            botao.click(timeout=5_000)
+            return
+
+        except PlaywrightTimeoutError:
+            provas_consecutivas = 0
+            page.wait_for_timeout(300)
+        except Exception:
+            provas_consecutivas = 0
+            page.wait_for_timeout(300)
 
     raise pf.PortalFlowError(
-        "A etapa Emitir Guia não ficou pronta para clique em até 90 segundos. "
-        "O botão pode estar visível, mas ainda coberto pela camada de carregamento."
+        "O botão 'Emitir Guia' foi localizado, porém o layout não permaneceu estável o suficiente "
+        "para um clique seguro em até 90 segundos. Nenhum clique forçado foi realizado."
     )
 
 
 def _extrair_numero_guia(page: Page) -> str | None:
-    """Extrai o identificador exibido ao lado da TAG após a emissão.
-
-    Exemplo observado no portal: 0126091761792989-0.
-    O hífen diferencia o número da guia de CNPJ/CNO/CPF comuns exibidos na tela.
-    """
+    """Extrai dinamicamente o identificador da guia exibido ao lado da TAG."""
     texto = _texto_pagina(page)
     candidatos = re.findall(r"(?<!\d)(\d{12,25}-\d{1,4})(?!\d)", texto)
     if not candidatos:
         return None
-
-    # Na etapa pós-emissão o número da guia aparece na região superior, ao lado da TAG.
-    # Se houver mais de um candidato, evitamos escolher silenciosamente.
     unicos = list(dict.fromkeys(candidatos))
     if len(unicos) == 1:
         return unicos[0]
@@ -139,26 +197,18 @@ def _extrair_numero_guia(page: Page) -> str | None:
 
 
 def _aguardar_emissao_confirmada(page: Page, timeout_ms: int = 90_000) -> str:
-    """Aguarda a emissão real, sem aplicar o timeout curto dos downloads.
-
-    A emissão só é considerada concluída quando o overlay desapareceu e o número
-    da guia passou a existir na página. 'Reiniciar' sozinho não é suficiente.
-    """
     limite = time.monotonic() + timeout_ms / 1000
     while time.monotonic() < limite:
         if _overlay_carregamento_visivel(page):
             page.wait_for_timeout(300)
             continue
-
         numero = _extrair_numero_guia(page)
         if numero:
             return numero
-
         page.wait_for_timeout(400)
-
     raise pf.PortalFlowError(
         "Após 'Emitir Guia', o portal não apresentou o número da guia em até 90 segundos. "
-        "A automação não assumirá que a emissão terminou apenas porque o botão 'Reiniciar' apareceu."
+        "A automação não assumirá que a emissão terminou apenas porque 'Reiniciar' apareceu."
     )
 
 
@@ -183,12 +233,6 @@ def _texto_elemento(locator: Locator) -> str:
 
 
 def _controle_pdf_secao(page: Page, secao: str) -> Locator | None:
-    """Localiza o controle PDF dentro da seção FGTS ou Consignado.
-
-    O portal atual exibe ícones circulares, não necessariamente um botão com o
-    texto 'Imprimir Relatório em PDF'. A busca fica restrita ao menor contêiner
-    estrutural da seção que contenha um descendente clicável identificável como PDF.
-    """
     titulos = pf._visiveis(page.get_by_text(secao, exact=True))
     if not titulos:
         return None
@@ -213,11 +257,8 @@ def _controle_pdf_secao(page: Page, secao: str) -> Locator | None:
                 candidatos_encontrados.append(pdfs[0])
                 break
             if len(pdfs) > 1:
-                # Em FGTS pode haver PDF + CSV; só aceitamos um controle que seja
-                # inequivocamente PDF. Se mais de um contiver 'pdf', não adivinhamos.
                 return None
 
-    # Remove duplicidades geométricas do mesmo controle encontrado por títulos repetidos.
     unicos: list[Locator] = []
     chaves: set[str] = set()
     for item in candidatos_encontrados:
@@ -273,8 +314,6 @@ def _baixar_relatorio(page: Page, botao: Locator, tipo: str, competencia: str, i
 
     sugerido = _nome_seguro(download.suggested_filename)
     destino = pasta / f"{tipo}_{sugerido}"
-
-    # save_as só retorna depois de o arquivo ter sido concluído pelo navegador.
     try:
         download.save_as(str(destino))
     except Exception as exc:
@@ -328,11 +367,11 @@ def executar_fase5(
     avancar = _aguardar_botao_habilitado(page, "Avançar", timeout_ms=60_000)
     avancar.click()
 
-    log("[3/7] Aguardando a etapa Emitir Guia ficar totalmente desbloqueada...")
-    emitir = _aguardar_etapa_emitir_guia(page, timeout_ms=90_000)
+    log("[3/7] Aguardando a etapa Emitir Guia ficar totalmente desbloqueada e estável...")
+    _aguardar_etapa_emitir_guia(page, timeout_ms=90_000)
 
-    log("[4/7] Emitindo a guia...")
-    emitir.click(timeout=10_000)
+    log("[4/7] Emitindo a guia com clique protegido por prova de estabilidade...")
+    _clicar_emitir_guia_seguro(page, timeout_ms=90_000)
 
     log("[5/7] Aguardando a emissão REAL terminar e o número da guia aparecer...")
     numero_guia = _aguardar_emissao_confirmada(page, timeout_ms=90_000)
