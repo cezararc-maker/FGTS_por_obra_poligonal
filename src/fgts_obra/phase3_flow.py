@@ -66,7 +66,6 @@ def _aguardar_grade(page: Page, inscricao: str, competencia: str, timeout_ms: in
         total = _detectar_grade_resultados(page, inscricao, competencia)
         if total is not None:
             return total
-        # Mesmo sem paginação identificável, os marcadores + inscrição já provam a grade.
         texto = _normalizar(_texto_pagina(page))
         if (
             "Seleção de Débitos" in texto
@@ -82,22 +81,76 @@ def _aguardar_grade(page: Page, inscricao: str, competencia: str, timeout_ms: in
     )
 
 
-def _checkbox_geral_grade(page: Page) -> Locator:
-    """Escolhe o checkbox geral pela proximidade do cabeçalho da grade."""
+def _caixa(locator: Locator) -> dict | None:
+    try:
+        return locator.bounding_box()
+    except Exception:
+        return None
+
+
+def _checkboxes_grade(page: Page) -> tuple[Locator, list[Locator]]:
+    """Identifica o checkbox geral e os checkboxes de linhas pela geometria da grade.
+
+    A grade do FGTS Digital não é uma <table> HTML tradicional. Usamos o cabeçalho
+    'Competência de Apuração' como referência visual. O checkbox geral fica à
+    esquerda e alinhado verticalmente ao cabeçalho; os checkboxes das linhas ficam
+    abaixo dele, praticamente na mesma coluna X.
+    """
     cabecalhos = pf._visiveis(page.get_by_text("Competência de Apuração", exact=False))
     if not cabecalhos:
         raise pf.PortalFlowError("Cabeçalho 'Competência de Apuração' não foi localizado na grade de resultados.")
-    referencia = cabecalhos[0]
 
-    checkboxes = pf._visiveis(page.get_by_role("checkbox"))
-    if not checkboxes:
-        raise pf.PortalFlowError("Nenhum checkbox visível foi encontrado na grade de resultados.")
+    # Preferimos o cabeçalho que estiver mais próximo da região dos resultados.
+    referencia = cabecalhos[-1]
+    caixa_ref = _caixa(referencia)
+    if not caixa_ref:
+        raise pf.PortalFlowError("Não foi possível medir o cabeçalho da grade de resultados.")
 
-    candidato = pf._mais_proximo(referencia, checkboxes, "checkbox geral da grade")
-    return candidato
+    ref_x = caixa_ref["x"]
+    ref_y = caixa_ref["y"] + caixa_ref["height"] / 2
+
+    candidatos: list[tuple[float, float, Locator]] = []
+    for checkbox in pf._visiveis(page.get_by_role("checkbox")):
+        caixa = _caixa(checkbox)
+        if not caixa:
+            continue
+        cx = caixa["x"] + caixa["width"] / 2
+        cy = caixa["y"] + caixa["height"] / 2
+
+        # Checkbox da grade deve estar à esquerda do cabeçalho de competência.
+        if cx >= ref_x:
+            continue
+
+        candidatos.append((cx, cy, checkbox))
+
+    if not candidatos:
+        raise pf.PortalFlowError("Nenhum checkbox compatível com a grade de débitos foi localizado.")
+
+    # O geral é o checkbox à esquerda cujo centro está mais alinhado ao cabeçalho.
+    candidatos.sort(key=lambda item: abs(item[1] - ref_y))
+    geral_x, geral_y, geral = candidatos[0]
+
+    # Exigimos alinhamento vertical razoável para não confundir com filtros acima.
+    if abs(geral_y - ref_y) > 70:
+        raise pf.PortalFlowError(
+            "O checkbox mais próximo do cabeçalho não está alinhado com a grade; a automação parou para evitar seleção incorreta."
+        )
+
+    linhas: list[Locator] = []
+    for cx, cy, checkbox in candidatos[1:]:
+        if cy <= geral_y + 15:
+            continue
+        if abs(cx - geral_x) > 35:
+            continue
+        linhas.append(checkbox)
+
+    if not linhas:
+        raise pf.PortalFlowError("Os checkboxes das linhas da grade não foram identificados abaixo do checkbox geral.")
+
+    return geral, linhas
 
 
-def _marcar_checkbox(controle: Locator, page: Page) -> None:
+def _clicar_checkbox(controle: Locator, page: Page) -> None:
     if controle.is_checked():
         return
 
@@ -113,31 +166,76 @@ def _marcar_checkbox(controle: Locator, page: Page) -> None:
     else:
         controle.click()
 
-    page.wait_for_timeout(300)
-    if not controle.is_checked():
-        raise pf.PortalFlowError("O checkbox geral da grade não permaneceu marcado após o clique.")
+
+def _marcar_e_validar_grade(page: Page) -> int:
+    geral, linhas = _checkboxes_grade(page)
+    _clicar_checkbox(geral, page)
+
+    limite = time.monotonic() + 3
+    while time.monotonic() < limite:
+        try:
+            geral_marcado = geral.is_checked()
+        except Exception:
+            # A grade pode rerenderizar após a seleção; relocalizamos.
+            geral, linhas = _checkboxes_grade(page)
+            geral_marcado = geral.is_checked()
+
+        marcadas = 0
+        for linha in linhas:
+            try:
+                if linha.is_checked():
+                    marcadas += 1
+            except Exception:
+                pass
+
+        if geral_marcado and marcadas > 0:
+            return marcadas
+        page.wait_for_timeout(150)
+
+    raise pf.PortalFlowError(
+        "O clique no checkbox geral não resultou em seleção comprovada das linhas da grade. "
+        "A automação parou antes de procurar 'Adicionar à guia'."
+    )
 
 
 def _botao_adicionar_guia(page: Page) -> Locator:
-    candidatos = pf._visiveis(
-        page.get_by_role("button", name=re.compile(r"^Adicionar\s+à\s+guia$", re.IGNORECASE))
-    )
-    if len(candidatos) == 1:
-        return candidatos[0]
-    if len(candidatos) > 1:
-        raise pf.PortalFlowError("Mais de um botão 'Adicionar à guia' ficou visível.")
+    """Aguarda o controle Adicionar à guia ficar disponível após seleção comprovada."""
+    limite = time.monotonic() + 5
+    while time.monotonic() < limite:
+        candidatos = pf._visiveis(
+            page.get_by_role("button", name=re.compile(r"Adicionar\s+à\s+guia", re.IGNORECASE))
+        )
+        habilitados = [item for item in candidatos if item.is_enabled()]
+        if len(habilitados) == 1:
+            return habilitados[0]
+        if len(habilitados) > 1:
+            raise pf.PortalFlowError("Mais de um botão habilitado 'Adicionar à guia' ficou visível.")
 
-    textos = pf._visiveis(page.get_by_text(re.compile(r"^Adicionar\s+à\s+guia$", re.IGNORECASE)))
-    if len(textos) == 1:
-        atual = textos[0]
-        for _ in range(4):
-            try:
-                if atual.get_attribute("role") == "button" or atual.evaluate("el => el.tagName") == "BUTTON":
-                    return atual
-                atual = atual.locator("xpath=..")
-            except Exception:
-                break
-    raise pf.PortalFlowError("Botão 'Adicionar à guia' não foi localizado de forma única após a seleção dos débitos.")
+        textos = pf._visiveis(page.get_by_text(re.compile(r"Adicionar\s+à\s+guia", re.IGNORECASE)))
+        botoes: list[Locator] = []
+        for texto in textos:
+            atual = texto
+            for _ in range(4):
+                try:
+                    tag = atual.evaluate("el => el.tagName")
+                    role = atual.get_attribute("role")
+                    if tag == "BUTTON" or role == "button":
+                        if atual.is_visible() and atual.is_enabled():
+                            botoes.append(atual)
+                        break
+                    atual = atual.locator("xpath=..")
+                except Exception:
+                    break
+        if len(botoes) == 1:
+            return botoes[0]
+        if len(botoes) > 1:
+            raise pf.PortalFlowError("Mais de um controle habilitado 'Adicionar à guia' foi localizado.")
+
+        page.wait_for_timeout(200)
+
+    raise pf.PortalFlowError(
+        "Os débitos foram selecionados, mas o controle 'Adicionar à guia' não apareceu habilitado em até 5 segundos."
+    )
 
 
 def executar_fase3(
@@ -194,17 +292,18 @@ def executar_fase3(
     pesquisar = pf._unico_visivel(page.get_by_role("button", name="Pesquisar", exact=True), "Pesquisar")
     pesquisar.click()
     total_itens = _aguardar_grade(page, inscricao, competencia)
-    log(f"Grade de débitos confirmada. Total informado pelo portal: {total_itens if total_itens is not None else 'não identificado' }.")
+    log(
+        "Grade de débitos confirmada. Total informado pelo portal: "
+        f"{total_itens if total_itens is not None else 'não identificado'}."
+    )
 
-    log("[9/10] Marcando o checkbox geral da grade...")
-    checkbox = _checkbox_geral_grade(page)
-    _marcar_checkbox(checkbox, page)
+    log("[9/10] Marcando o checkbox geral e comprovando a seleção das linhas...")
+    linhas_marcadas = _marcar_e_validar_grade(page)
+    log(f"Seleção da grade confirmada: {linhas_marcadas} linha(s) visível(is) marcada(s).")
 
-    log("[10/10] Acionando 'Adicionar à guia' e PARANDO antes de Avançar...")
+    log("[10/10] Aguardando e acionando 'Adicionar à guia'; parada antes de Avançar...")
     adicionar = _botao_adicionar_guia(page)
     adicionar.scroll_into_view_if_needed()
-    if not adicionar.is_enabled():
-        raise pf.PortalFlowError("O botão 'Adicionar à guia' continuou desabilitado após marcar a grade.")
     adicionar.click()
     page.wait_for_timeout(700)
 
