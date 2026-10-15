@@ -28,6 +28,6 @@ echo 3. Deixe o navegador aberto.
 echo 4. Depois use o botao "Testar conexao com Chrome" no programa.
 echo.
 
-start "FGTS Poligonal - Chrome" "%CHROME%" --remote-debugging-port=9222 --user-data-dir="%PROFILE%" --start-maximized
+start "FGTS Poligonal - Chrome" "%CHROME%" --remote-debugging-port=9222 --user-data-dir="%PROFILE%" --start-maximized "https://fgtsdigital.sistema.gov.br/cobranca/"
 
 endlocal

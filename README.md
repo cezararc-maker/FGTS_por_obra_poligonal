@@ -43,9 +43,11 @@ No painel principal, use **Abrir Chrome dedicado**. Também é possível abrir e
 .\scripts\abrir_chrome.bat
 ```
 
+O Chrome dedicado abre diretamente `https://fgtsdigital.sistema.gov.br/cobranca/`. Se o portal redirecionar para autenticação, conclua-a manualmente.
+
 No Chrome aberto pelo script:
 
-1. acesse o FGTS Digital;
+1. confirme que o FGTS Digital abriu;
 2. faça a autenticação/certificado manualmente;
 3. assuma a procuração/empresa, quando necessário;
 4. deixe a sessão aberta.
