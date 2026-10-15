@@ -10,7 +10,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from .app import AppFGTS
-from .batch_state import carregar_controle, chave_item, registrar_guia_recuperada, salvar_status, status_atual
+from .batch_state import carregar_controle, chave_item, registrar_guia_nao_encontrada, registrar_guia_recuperada, salvar_status, status_atual
 from .browser_connection import BrowserSession
 from .phase3_flow import SemDebitos
 from .phase5_flow import DownloadRelatorioTimeout, _reiniciar
@@ -90,6 +90,12 @@ class AppFGTSFinal(AppFGTS):
         )
         self.btn_recuperada.pack(side="left", padx=8)
 
+        self.btn_nao_encontrada = ttk.Button(
+            self.acoes_adicionais, text="Conferi: guia não encontrada",
+            command=self._registrar_guia_nao_encontrada,
+        )
+        self.btn_nao_encontrada.pack(side="left", padx=8)
+
         self.btn_parar = ttk.Button(
             self.acoes_adicionais,
             text="Parar após a atual",
@@ -165,7 +171,7 @@ class AppFGTSFinal(AppFGTS):
         dados = carregar_controle(self.resultado.competencia)
         linhas = [
             str(item.linha) for item in self.resultado.itens
-            if not dados.get(chave_item(self.resultado.competencia, item.tipo_inscricao, item.inscricao), {}).get("status")
+            if dados.get(chave_item(self.resultado.competencia, item.tipo_inscricao, item.inscricao), {}).get("status") in {None, "LIBERADO_REEMISSAO"}
             and self.tabela.exists(str(item.linha))
         ]
         self.tabela.selection_remove(*self.tabela.selection())
@@ -195,6 +201,8 @@ class AppFGTSFinal(AppFGTS):
             fgts_baixado = bool(fgts and Path(fgts).is_file())
             if status == "CONCLUIDO":
                 situacao = "Concluída" if guia_baixada and fgts_baixado else "Concluída; conferir arquivos"
+            elif status == "LIBERADO_REEMISSAO":
+                situacao = "Guia não encontrada; nova tentativa liberada"
             elif status == "GUIA_RECUPERADA":
                 situacao = "Guia recuperada; relatórios pendentes"
             elif status == "CONFERIR_EMISSAO":
@@ -244,6 +252,36 @@ class AppFGTSFinal(AppFGTS):
             return
         self._atualizar_situacoes()
         self._registrar(f"Guia recuperada registrada para {item.tipo_inscricao} {item.inscricao}.")
+
+    def _registrar_guia_nao_encontrada(self) -> None:
+        if self._executando or self.resultado is None:
+            return
+        itens = self._itens_selecionados()
+        if len(itens) != 1:
+            messagebox.showwarning("Conferência da guia", "Selecione uma única inscrição.")
+            return
+        item = itens[0]
+        if status_atual(self.resultado.competencia, item.tipo_inscricao, item.inscricao) not in {
+            "PROCESSANDO", "CONFERIR_EMISSAO",
+        }:
+            messagebox.showwarning("Conferência da guia", "Esta inscrição não está aguardando conferência de emissão.")
+            return
+        if not messagebox.askyesno(
+            "Confirmar conferência",
+            f"Você conferiu no FGTS Digital e não encontrou guia emitida para "
+            f"{item.tipo_inscricao} {item.inscricao}?\n\n"
+            "Isso libera uma nova tentativa de emissão. Confira também as guias em processamento no portal.",
+        ):
+            return
+        try:
+            registrar_guia_nao_encontrada(
+                self.resultado.competencia, item.tipo_inscricao, item.inscricao,
+            )
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Conferência da guia", str(exc))
+            return
+        self._atualizar_situacoes()
+        self._registrar(f"Guia não encontrada após conferência: {item.tipo_inscricao} {item.inscricao}. Nova tentativa liberada.")
 
     def _itens_selecionados(self):
         if self.resultado is None:

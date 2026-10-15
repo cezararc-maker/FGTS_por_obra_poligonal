@@ -122,7 +122,7 @@ O controle persistente fica na pasta da competência:
 %USERPROFILE%\Downloads\FGTS_por_obra_poligonal\<MM-AAAA>\controle_lote.json
 ```
 
-Inscrições marcadas como `CONCLUIDO`, `CONFERIR_EMISSAO`, `GUIA_RECUPERADA`, `PROCESSANDO` ou com relatório pendente não são reemitidas automaticamente. Se a conexão com o Chrome falhar após o início da emissão, confira a guia no portal antes de nova tentativa. Para uma guia já emitida e recuperada pelo operador, selecione uma inscrição no painel e use **Registrar guia recuperada** para indicar o PDF. Esse registro não confirma os relatórios nem encerra o lote. O checkpoint e os PDFs são locais; `git pull` não os sincroniza entre máquinas.
+Inscrições marcadas como `CONCLUIDO`, `CONFERIR_EMISSAO`, `GUIA_RECUPERADA`, `PROCESSANDO` ou com relatório pendente não são reemitidas automaticamente. Se a conexão com o Chrome falhar após o início da emissão, confira a guia no portal antes de nova tentativa. Para uma guia já emitida e recuperada pelo operador, selecione uma inscrição no painel e use **Registrar guia recuperada** para indicar o PDF. Esse registro não confirma os relatórios nem encerra o lote. Se a inscrição estiver como **Em processamento; conferir se parou** ou **Conferir emissão; NÃO repetir**, selecione somente ela e use **Conferi: guia não encontrada** após verificar no portal que não houve emissão. A confirmação libera uma nova tentativa e fica registrada no controle local. O checkpoint e os PDFs são locais; `git pull` não os sincroniza entre máquinas.
 
 ## ZIP da competência
 

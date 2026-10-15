@@ -122,6 +122,20 @@ def registrar_guia_recuperada(
     )
 
 
+def registrar_guia_nao_encontrada(competencia: str, tipo_inscricao: str, inscricao: str) -> None:
+    """Libera nova tentativa somente após a conferência explícita do operador."""
+    atual = registro_item(competencia, tipo_inscricao, inscricao)
+    if atual.get("status") not in {"PROCESSANDO", "CONFERIR_EMISSAO"}:
+        raise ValueError("Esta inscrição não está aguardando conferência de emissão.")
+    guia = atual.get("guia")
+    if guia and Path(guia).is_file():
+        raise ValueError("Já existe um PDF de guia registrado para esta inscrição.")
+    salvar_status(
+        competencia, tipo_inscricao, inscricao, status="LIBERADO_REEMISSAO",
+        erro="Operador conferiu no portal e não encontrou guia; nova tentativa liberada.",
+    )
+
+
 def status_atual(competencia: str, tipo_inscricao: str, inscricao: str) -> str | None:
     dados = carregar_controle(competencia)
     item = dados.get(chave_item(competencia, tipo_inscricao, inscricao))
