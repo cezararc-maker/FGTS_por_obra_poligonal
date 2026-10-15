@@ -64,7 +64,7 @@ def _detectar_grade_resultados(page: Page, inscricao: str, competencia: str) -> 
     return None
 
 
-def _aguardar_grade(page: Page, inscricao: str, competencia: str, timeout_ms: int = 60_000) -> int | None:
+def _aguardar_grade(page: Page, inscricao: str, competencia: str, timeout_ms: int = 60_000, campo_inscricao: Locator | None = None) -> int | None:
     """Aguarda carregamento e controles utilizáveis antes de selecionar débitos."""
     limite = time.monotonic() + timeout_ms / 1000
     pronta_desde: float | None = None
@@ -80,11 +80,17 @@ def _aguardar_grade(page: Page, inscricao: str, competencia: str, timeout_ms: in
         if not carregando:
             total = _detectar_grade_resultados(page, inscricao, competencia)
             texto = _normalizar(_texto_pagina(page))
+            # Valores de filtros ficam em inputs/selects e não aparecem em body.inner_text().
+            # A competência foi conferida ao selecioná-la; a inscrição é conferida
+            # novamente no input depois da pesquisa.
+            inscricao_confirmada = (
+                campo_inscricao is not None
+                and pf._digitos(campo_inscricao.input_value()) == pf._digitos(inscricao)
+            )
             contexto = (
                 "Seleção de Débitos" in texto
                 and "Competência de Apuração" in texto
-                and competencia in texto
-                and pf._digitos(inscricao) in pf._digitos(texto)
+                and inscricao_confirmada
             )
             sem_debitos = contexto and (
                 "Nenhum item encontrado" in texto or total == 0
@@ -347,7 +353,7 @@ def executar_fase3(
     log("[8/10] Pesquisando e aguardando a grade real de débitos...")
     pesquisar = pf._unico_visivel(page.get_by_role("button", name="Pesquisar", exact=True), "Pesquisar")
     pesquisar.click()
-    total_itens = _aguardar_grade(page, inscricao, competencia)
+    total_itens = _aguardar_grade(page, inscricao, competencia, campo_inscricao=campo)
     log(
         "Grade de débitos confirmada. Total informado pelo portal: "
         f"{total_itens if total_itens is not None else 'não identificado'}."

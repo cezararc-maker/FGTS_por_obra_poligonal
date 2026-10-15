@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import Mock, patch
+from types import SimpleNamespace
 from fgts_obra import phase3_flow as flow
 
 
@@ -21,7 +22,8 @@ class WaitGradeTests(unittest.TestCase):
              patch.object(flow, '_detectar_grade_resultados', return_value=total), \
              patch.object(flow, '_texto_pagina', return_value='Seleção de Débitos Competência de Apuração 09/2026 123456789012'), \
              patch.object(flow, '_checkboxes_grade', side_effect=controls):
-            result = flow._aguardar_grade(page, '123456789012', '09/2026', timeout_ms=3000)
+            result = flow._aguardar_grade(page, '123456789012', '09/2026', timeout_ms=3000,
+                                         campo_inscricao=SimpleNamespace(input_value=lambda: '123456789012'))
         control.click.assert_not_called()
         return result, clock[0]
 
