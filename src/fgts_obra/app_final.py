@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import multiprocessing
 import queue
 import threading
@@ -596,8 +597,19 @@ class AppFGTSFinal(AppFGTS):
             self.after(0, liberar)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="FGTS por Obra / Poligonal")
+    parser.add_argument("--planilha", type=Path, help="Planilha XLSX para carregar ao abrir")
+    args = parser.parse_args(argv)
     app = AppFGTSFinal()
+    if args.planilha:
+        path = args.planilha.resolve()
+
+        def carregar() -> None:
+            app.caminho_var.set(str(path))
+            app._validar_planilha(path)
+
+        app.after(0, carregar)
     app.mainloop()
 
 

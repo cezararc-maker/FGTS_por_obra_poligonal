@@ -52,6 +52,10 @@ No Chrome aberto pelo script:
 3. assuma a procuração/empresa, quando necessário;
 4. deixe a sessão aberta.
 
+## Importação direta do Leitor de Extrato
+
+Abra `ABRIR_LEITOR_FGTS.bat` no repositório irmão `Leitor_PDF_Extrato_Mensal_Poligonal`. Depois de processar o PDF, **Exportar para FGTS por Obra** salva uma cópia validada do XLSX em Downloads e abre este painel com a planilha carregada. A ponte usa somente `127.0.0.1`, porta temporária e token da sessão; não acessa o portal nem emite guias automaticamente. O botão **Baixar XLSX** do leitor continua funcionando separadamente.
+
 ## Executar a aplicação
 
 ```powershell
