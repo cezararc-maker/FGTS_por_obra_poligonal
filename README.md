@@ -67,7 +67,8 @@ A interface principal permite:
 - usar **Gerar todas as pendentes** para selecionar somente inscrições sem processamento registrado e abrir a confirmação antes do lote;
 - conferir a seleção antes da emissão;
 - gerar guias em sequência;
-- solicitar `Parar após a atual`;
+- solicitar `Parar após a atual` para terminar a inscrição em andamento;
+- usar **Parar imediatamente** para encerrar o programa na hora e manter o Chrome aberto; a inscrição em andamento fica para conferência no portal antes de qualquer repetição;
 - mostrar na primeira coluna o estado de cada inscrição, incluindo PDF da guia e relatório FGTS registrados;
 - atualizar as situações pelo botão **Atualizar situações**;
 - registrar manualmente um PDF de guia recuperada sem marcar relatórios ou lote como concluídos;

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 import tkinter as tk
 import unicodedata
@@ -69,6 +70,14 @@ class AppFGTSFinal(AppFGTS):
             state="disabled",
         )
         self.btn_parar.pack(side="left", padx=8)
+
+        self.btn_parar_agora = ttk.Button(
+            self.acoes_adicionais,
+            text="Parar imediatamente",
+            command=self._parar_imediatamente,
+            state="disabled",
+        )
+        self.btn_parar_agora.pack(side="left", padx=8)
 
         self.btn_zip = ttk.Button(
             self.acoes_adicionais,
@@ -233,6 +242,13 @@ class AppFGTSFinal(AppFGTS):
             self._parar_apos_atual.set()
             self._registrar("Parada solicitada: o lote será encerrado após a inscrição atual.")
 
+    def _parar_imediatamente(self) -> None:
+        if not self._executando:
+            return
+        # Encerra somente este processo Python. O Chrome dedicado permanece aberto.
+        # O checkpoint PROCESSANDO exige conferência no portal antes de repetir a inscrição.
+        os._exit(130)
+
     def _log_worker(self, mensagem: str) -> None:
         self.after(0, lambda m=mensagem: self._registrar(m))
 
@@ -315,6 +331,7 @@ class AppFGTSFinal(AppFGTS):
         self._parar_apos_atual.clear()
         self.btn_fase2.configure(state="disabled")
         self.btn_parar.configure(state="normal")
+        self.btn_parar_agora.configure(state="normal")
         self.btn_chrome.configure(state="disabled")
         self.btn_preparar.configure(state="disabled")
         self.btn_zip.configure(state="disabled")
@@ -448,6 +465,7 @@ class AppFGTSFinal(AppFGTS):
                 self._executando = False
                 self.btn_fase2.configure(state="normal")
                 self.btn_parar.configure(state="disabled")
+                self.btn_parar_agora.configure(state="disabled")
                 self.btn_chrome.configure(state="normal")
                 self.btn_preparar.configure(state="normal")
                 self.btn_zip.configure(state="normal")

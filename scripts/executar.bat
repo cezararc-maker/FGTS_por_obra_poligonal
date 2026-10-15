@@ -12,6 +12,11 @@ if not exist ".venv\Scripts\python.exe" (
 set "PYTHONPATH=%CD%\src"
 ".venv\Scripts\python.exe" -m fgts_obra.app_final
 
+if "%errorlevel%"=="130" (
+    echo [INFO] Automacao interrompida imediatamente pelo operador.
+    exit /b 0
+)
+
 if errorlevel 1 (
     echo.
     echo [ERRO] A aplicacao foi encerrada com erro.
