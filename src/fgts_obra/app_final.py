@@ -18,10 +18,7 @@ class AppFGTSFinal(AppFGTS):
     def __init__(self) -> None:
         super().__init__()
         self.title("FGTS por Obra / Poligonal")
-        self.tabela.heading("codigo", text="Código")
-        self.tabela["columns"] = ("situacao", "linha", "codigo", "tipo", "inscricao", "servico", "tag")
-        self.tabela.heading("situacao", text="Situação da guia")
-        self.tabela.column("situacao", width=250, minwidth=180, anchor="w")
+        self._configurar_colunas()
         self.tabela.configure(selectmode="extended")
 
         self.btn_preparar.configure(text="Conferir seleção", command=self._conferir_selecao)
@@ -55,6 +52,16 @@ class AppFGTSFinal(AppFGTS):
             state="disabled",
         )
         self.btn_zip.pack(side="left", padx=8)
+
+    def _configurar_colunas(self) -> None:
+        # Tk limpa os títulos anteriores ao redefinir a lista de colunas.
+        colunas = ("situacao", "linha", "codigo", "tipo", "inscricao", "servico", "tag")
+        titulos = ("Situação da guia", "Linha", "Código", "Tipo", "Inscrição", "Serviço", "TAG")
+        larguras = (250, 60, 90, 90, 150, 430, 220)
+        self.tabela["columns"] = colunas
+        for coluna, titulo, largura in zip(colunas, titulos, larguras):
+            self.tabela.heading(coluna, text=titulo)
+            self.tabela.column(coluna, width=largura, anchor="w")
 
     def _validar_planilha(self, caminho: Path) -> None:
         super()._validar_planilha(caminho)

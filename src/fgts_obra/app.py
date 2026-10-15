@@ -61,9 +61,13 @@ class AppFGTS(tk.Tk):
             self.tabela.column(coluna, width=larguras[coluna], anchor="w")
 
         scroll_y = ttk.Scrollbar(tabela_frame, orient="vertical", command=self.tabela.yview)
-        self.tabela.configure(yscrollcommand=scroll_y.set)
-        self.tabela.pack(side="left", fill="both", expand=True)
-        scroll_y.pack(side="right", fill="y")
+        scroll_x = ttk.Scrollbar(tabela_frame, orient="horizontal", command=self.tabela.xview)
+        self.tabela.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
+        self.tabela.grid(row=0, column=0, sticky="nsew")
+        scroll_y.grid(row=0, column=1, sticky="ns")
+        scroll_x.grid(row=1, column=0, sticky="ew")
+        tabela_frame.columnconfigure(0, weight=1)
+        tabela_frame.rowconfigure(0, weight=1)
 
         acoes = ttk.Frame(self, padding=(10, 0, 10, 10))
         acoes.pack(fill="x")
