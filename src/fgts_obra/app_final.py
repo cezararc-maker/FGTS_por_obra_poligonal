@@ -8,6 +8,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from .app import AppFGTS
 from .batch_state import carregar_controle, chave_item, registrar_guia_recuperada, salvar_status, status_atual
 from .browser_connection import BrowserSession
+from .phase3_flow import SemDebitos
 from .phase5_flow import DownloadRelatorioTimeout, _reiniciar
 from .phase6_flow import gerar_zip_competencia, pasta_competencia
 from .portal_flow import salvar_screenshot_erro
@@ -134,6 +135,8 @@ class AppFGTSFinal(AppFGTS):
                 situacao = "Conferir emissão; NÃO repetir"
             elif status in {"PENDENTE_RELATORIO", "PENDENTE_RELATORIO_CONTINUADO"}:
                 situacao = "Emitida; relatório pendente"
+            elif status == "SEM_DEBITOS":
+                situacao = "Não há débitos"
             elif status == "PROCESSANDO":
                 situacao = "Em processamento; conferir se parou"
             elif status == "ERRO":
@@ -292,6 +295,7 @@ class AppFGTSFinal(AppFGTS):
         concluidos = 0
         pendencias = 0
         erros = 0
+        sem_debitos = 0
         interrompido = False
 
         try:
@@ -323,6 +327,10 @@ class AppFGTSFinal(AppFGTS):
                         f"[{indice}/{total}] CONCLUÍDO | Guia {resultado.numero_guia or 'número não identificado'} | "
                         f"Pasta: {Path(resultado.guia.caminho).parent if resultado.guia.caminho else '-'}"
                     )
+
+                except SemDebitos as exc:
+                    sem_debitos += 1
+                    self._log_worker(f"[{indice}/{total}] NÃO HÁ DÉBITOS | {item.tipo_inscricao} {item.inscricao}")
 
                 except DownloadRelatorioTimeout as exc:
                     pendencias += 1
@@ -396,7 +404,7 @@ class AppFGTSFinal(AppFGTS):
             pasta = pasta_competencia(self.resultado.competencia)
             resumo = (
                 f"Processamento {'INTERROMPIDO' if interrompido else 'FINALIZADO'}\n\n"
-                f"Concluídas: {concluidos}\nPendências de relatório: {pendencias}\nErros: {erros}\n\n"
+                f"Concluídas: {concluidos}\nSem débitos: {sem_debitos}\nPendências de relatório: {pendencias}\nErros: {erros}\n\n"
                 f"Pasta da competência: {pasta}"
             )
             if zip_criado:

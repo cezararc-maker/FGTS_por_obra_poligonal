@@ -13,6 +13,10 @@ from . import portal_flow as pf
 LogFn = Callable[[str], None]
 
 
+class SemDebitos(pf.PortalFlowError):
+    """A pesquisa terminou e o portal informou que não há débitos."""
+
+
 @dataclass
 class ResultadoFase3:
     tipo_inscricao: str
@@ -64,6 +68,7 @@ def _aguardar_grade(page: Page, inscricao: str, competencia: str, timeout_ms: in
     """Aguarda carregamento e controles utilizáveis antes de selecionar débitos."""
     limite = time.monotonic() + timeout_ms / 1000
     pronta_desde: float | None = None
+    sem_debitos_desde: float | None = None
     assinatura_anterior = None
     while time.monotonic() < limite:
         carregando = pf._visiveis(
@@ -81,7 +86,20 @@ def _aguardar_grade(page: Page, inscricao: str, competencia: str, timeout_ms: in
                 and competencia in texto
                 and pf._digitos(inscricao) in pf._digitos(texto)
             )
-            if contexto and total != 0:
+            sem_debitos = contexto and (
+                "Nenhum item encontrado" in texto or total == 0
+            )
+            if sem_debitos:
+                agora = time.monotonic()
+                if sem_debitos_desde is None:
+                    sem_debitos_desde = agora
+                elif agora - sem_debitos_desde >= 1.0:
+                    raise SemDebitos(
+                        f"Não há débitos para {inscricao} na competência {competencia}."
+                    )
+            else:
+                sem_debitos_desde = None
+            if contexto and not sem_debitos:
                 try:
                     geral, linhas = _checkboxes_grade(page)
                     pronta = geral.is_enabled() and all(linha.is_enabled() for linha in linhas)
@@ -89,6 +107,8 @@ def _aguardar_grade(page: Page, inscricao: str, competencia: str, timeout_ms: in
                 except pf.PortalFlowError:
                     # A grade pode existir antes de suas linhas serem renderizadas.
                     pass
+        if carregando:
+            sem_debitos_desde = None
         if pronta:
             agora = time.monotonic()
             if pronta_desde is None or assinatura != assinatura_anterior:

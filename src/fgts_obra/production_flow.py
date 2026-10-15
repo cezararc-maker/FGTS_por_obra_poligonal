@@ -7,6 +7,7 @@ from playwright.sync_api import Download
 
 from . import phase5_flow as p5
 from .batch_state import salvar_status
+from .phase3_flow import SemDebitos
 from .models import ItemPlanilha
 from .phase6_flow import gerar_zip_competencia, pasta_destino_item
 
@@ -91,12 +92,13 @@ def _log_operacional(log, total: int, indice: int):
 
 
 def executar_item_producao(page, *, item: ItemPlanilha, competencia: str, vencimento, log, indice: int, total: int):
-    destino = pasta_destino_item(competencia, item.tag, item.inscricao)
     salvar_status(competencia, item.tipo_inscricao, item.inscricao, status="PROCESSANDO")
 
     pasta_original = p5._pasta_downloads
     salvar_guia_original = p5._salvar_guia_automatica
-    p5._pasta_downloads = lambda _competencia, _inscricao: destino
+    p5._pasta_downloads = lambda _competencia, _inscricao: pasta_destino_item(
+        competencia, item.tag, item.inscricao
+    )
     p5._salvar_guia_automatica = _salvar_guia_direto
 
     emissao_iniciada = False
@@ -128,6 +130,10 @@ def executar_item_producao(page, *, item: ItemPlanilha, competencia: str, vencim
             consignado=resultado.consignado.caminho,
         )
         return resultado
+    except SemDebitos as exc:
+        salvar_status(competencia, item.tipo_inscricao, item.inscricao,
+                      status="SEM_DEBITOS", erro=str(exc))
+        raise
     except Exception as exc:
         salvar_status(
             competencia,

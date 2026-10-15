@@ -70,6 +70,7 @@ A interface principal permite:
 - mostrar na primeira coluna o estado de cada inscrição, incluindo PDF da guia e relatório FGTS registrados;
 - atualizar as situações pelo botão **Atualizar situações**;
 - registrar manualmente um PDF de guia recuperada sem marcar relatórios ou lote como concluídos;
+- indicar **Não há débitos** após uma pesquisa sem resultados, seguindo o lote sem emitir guia nem criar pasta para essa inscrição;
 - impedir repetição de inscrições já concluídas ou com emissão pendente de conferência no checkpoint;
 - gerar manualmente o ZIP da competência.
 
