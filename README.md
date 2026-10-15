@@ -61,7 +61,9 @@ No Chrome aberto pelo script:
 A interface principal permite:
 
 - selecionar e validar a planilha;
-- selecionar uma ou várias inscrições com `Ctrl + clique`;
+- selecionar uma ou várias inscrições com `Ctrl + clique`, ou um intervalo com `Shift + clique`;
+- usar **Selecionar todas as pendentes** sem iniciar a emissão;
+- usar **Gerar todas as pendentes** para selecionar somente inscrições sem processamento registrado e abrir a confirmação antes do lote;
 - conferir a seleção antes da emissão;
 - gerar guias em sequência;
 - solicitar `Parar após a atual`;

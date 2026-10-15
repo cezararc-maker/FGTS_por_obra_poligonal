@@ -27,6 +27,21 @@ class AppFGTSFinal(AppFGTS):
         self._parar_apos_atual = threading.Event()
         self._executando = False
 
+        barra_selecao = ttk.Frame(self.tabela.master, padding=(0, 6, 0, 0))
+        barra_selecao.grid(row=2, column=0, columnspan=2, sticky="ew")
+        ttk.Label(barra_selecao, text="Escolha algumas com Ctrl + clique, ou:").pack(side="left")
+        self.btn_selecionar_pendentes = ttk.Button(
+            barra_selecao, text="Selecionar todas as pendentes",
+            command=self._selecionar_pendentes, state="disabled",
+        )
+        self.btn_selecionar_pendentes.pack(side="left", padx=8)
+        self.btn_gerar_todas = ttk.Button(
+            barra_selecao, text="Gerar todas as pendentes",
+            command=self._gerar_todas_pendentes, state="disabled",
+        )
+        self.btn_gerar_todas.pack(side="left", padx=8)
+        ttk.Button(barra_selecao, text="Limpar seleção", command=self._limpar_selecao).pack(side="left", padx=8)
+
         self.btn_atualizar = ttk.Button(
             self.btn_fase2.master, text="Atualizar situações", command=self._atualizar_situacoes,
         )
@@ -69,6 +84,36 @@ class AppFGTSFinal(AppFGTS):
             self.btn_zip.configure(state="normal")
             self.status_var.set("Planilha validada. Selecione uma ou mais inscrições para gerar as guias.")
             self._atualizar_situacoes()
+            self.btn_selecionar_pendentes.configure(state="normal")
+            self.btn_gerar_todas.configure(state="normal")
+
+    def _limpar_selecao(self) -> None:
+        if self._executando:
+            return
+        self.tabela.selection_remove(*self.tabela.selection())
+
+    def _selecionar_pendentes(self) -> int:
+        if self._executando or self.resultado is None or not self.resultado.valida:
+            return 0
+        dados = carregar_controle(self.resultado.competencia)
+        linhas = [
+            str(item.linha) for item in self.resultado.itens
+            if not dados.get(chave_item(self.resultado.competencia, item.tipo_inscricao, item.inscricao), {}).get("status")
+            and self.tabela.exists(str(item.linha))
+        ]
+        self.tabela.selection_remove(*self.tabela.selection())
+        if not linhas:
+            messagebox.showinfo("Seleção em massa", "Não há inscrições sem processamento registrado para selecionar.")
+            return 0
+        self.tabela.selection_set(*linhas)
+        self.tabela.focus(linhas[0])
+        self.tabela.see(linhas[0])
+        self.status_var.set(f"{len(linhas)} inscrição(ões) pendente(s) selecionada(s). Confira antes de gerar.")
+        return len(linhas)
+
+    def _gerar_todas_pendentes(self) -> None:
+        if self._selecionar_pendentes():
+            self._iniciar_lote()
 
     def _atualizar_situacoes(self) -> None:
         if self.resultado is None or not self.resultado.valida:
@@ -238,6 +283,8 @@ class AppFGTSFinal(AppFGTS):
         self.btn_chrome.configure(state="disabled")
         self.btn_preparar.configure(state="disabled")
         self.btn_zip.configure(state="disabled")
+        self.btn_selecionar_pendentes.configure(state="disabled")
+        self.btn_gerar_todas.configure(state="disabled")
         threading.Thread(target=self._worker_lote, args=(pendentes,), daemon=True).start()
 
     def _worker_lote(self, itens) -> None:
@@ -364,6 +411,8 @@ class AppFGTSFinal(AppFGTS):
                 self.btn_chrome.configure(state="normal")
                 self.btn_preparar.configure(state="normal")
                 self.btn_zip.configure(state="normal")
+                self.btn_selecionar_pendentes.configure(state="normal")
+                self.btn_gerar_todas.configure(state="normal")
                 self._atualizar_situacoes()
             self.after(0, liberar)
 
