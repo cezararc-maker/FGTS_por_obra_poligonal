@@ -30,10 +30,10 @@ O fluxo foi validado no portal real com emissão, download da guia, relatório F
 No PowerShell, dentro do repositório:
 
 ```powershell
-.\scripts\instalar_teste.bat
+.\scripts\instalar.bat
 ```
 
-O nome histórico do instalador foi mantido para compatibilidade. Ele prepara o `.venv` e as dependências do projeto.
+O instalador prepara o `.venv` e as dependências do projeto.
 
 ## Abrir o Chrome dedicado
 
@@ -157,7 +157,7 @@ Quando todos os registros da planilha constarem como concluídos no checkpoint e
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Os testes cobrem regras de competência/vencimento, leitura da planilha, espera da grade após carregamento, organização da pasta de saída e escopo do ZIP. A validação funcional de setembro no portal ainda depende de nova execução assistida.
+Os testes cobrem regras de competência/vencimento, leitura da planilha, espera da grade após carregamento, organização da pasta de saída e escopo do ZIP. O fluxo de setembro de 2026 foi testado e validado pelo operador em 15/10/2026. Mudanças futuras devem ser conferidas antes de uso em lote.
 
 ## Estrutura relevante
 
@@ -174,11 +174,11 @@ src/fgts_obra/
 
 scripts/
   executar.bat
-  abrir_chrome_teste.bat
-  instalar_teste.bat
+  abrir_chrome.bat
+  instalar.bat
 ```
 
-Os módulos e scripts das fases de teste foram mantidos para histórico e diagnóstico, mas a entrada oficial da versão consolidada é `scripts\executar.bat`.
+As antigas entradas das fases de teste foram retiradas; permanecem no histórico Git. A entrada oficial é `scripts\executar.bat`.
 
 ## Dados sensíveis
 

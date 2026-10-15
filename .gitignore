@@ -47,3 +47,6 @@ checkpoints/
 config.local.toml
 config.local.yaml
 config.local.yml
+
+# Metadados locais de instalação editável
+src/*.egg-info/

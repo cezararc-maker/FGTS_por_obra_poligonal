@@ -255,7 +255,7 @@ class AppFGTS(tk.Tk):
             messagebox.showerror(
                 "Chrome não conectado",
                 "Não foi possível conectar ao Chrome dedicado.\n\n"
-                "Execute primeiro scripts\\abrir_chrome_teste.bat, faça o login manual no portal "
+                "Execute primeiro scripts\\abrir_chrome.bat, faça o login manual no portal "
                 "e tente novamente.\n\n"
                 f"Detalhe técnico: {exc}",
             )

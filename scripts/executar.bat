@@ -4,7 +4,7 @@ cd /d "%~dp0.."
 
 if not exist ".venv\Scripts\python.exe" (
     echo [ERRO] Ambiente .venv nao encontrado.
-    echo Execute primeiro: scripts\instalar_teste.bat
+    echo Execute primeiro: scripts\instalar.bat
     pause
     exit /b 1
 )
