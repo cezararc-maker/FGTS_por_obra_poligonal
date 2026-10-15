@@ -88,7 +88,7 @@ Para cada inscrição selecionada, a aplicação:
 6. seleciona os débitos e adiciona à guia;
 7. avança pelo Consignado sem alterar manualmente a seleção automática do portal;
 8. valida o vencimento;
-9. preenche a TAG exatamente conforme a planilha;
+9. preenche a TAG normalizada na importação da planilha (caracteres não aceitos são removidos e o ajuste aparece no painel);
 10. emite a guia;
 11. confirma a emissão pelo número dinâmico e/ou estado final do portal;
 12. salva a própria guia e os relatórios;

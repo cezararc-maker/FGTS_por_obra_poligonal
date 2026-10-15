@@ -5,10 +5,48 @@ from pathlib import Path
 
 from openpyxl import Workbook
 
-from fgts_obra.excel_reader import ler_planilha, normalizar_inscricao
+from fgts_obra.excel_reader import ler_planilha, normalizar_inscricao, normalizar_tag
 
 
 class TestExcelReader(unittest.TestCase):
+    def test_tag_remove_caracteres_recusados_e_preserva_permitidos(self):
+        self.assertEqual(
+            normalizar_tag("86-ALMOXARIFADO HU UFGD(EBS) #1"),
+            "86-ALMOXARIFADO HU UFGDEBS 1",
+        )
+        self.assertEqual(normalizar_tag("obra áçú $:%*+-./"), "OBRA ACU $:%*+-./")
+
+    def test_importacao_usa_tag_limpa_e_avisa(self):
+        with tempfile.TemporaryDirectory() as pasta:
+            caminho = Path(pasta) / "tag.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws["B1"] = date(2026, 8, 1)
+            ws["E1"] = date(2026, 9, 18)
+            self._preencher_registro_minimo(ws)
+            ws.cell(4, 4).value = "86-ALMOXARIFADO HU UFGD(EBS)"
+            wb.save(caminho)
+            resultado = ler_planilha(caminho)
+            self.assertTrue(resultado.valida)
+            self.assertEqual(resultado.itens[0].tag, "86-ALMOXARIFADO HU UFGDEBS")
+            self.assertTrue(any("TAG ajustada" in aviso for aviso in resultado.avisos))
+            self.assertEqual(ws.cell(4, 4).value, "86-ALMOXARIFADO HU UFGD(EBS)")
+
+    def test_tag_vazia_ou_longa_apos_limpeza_invalida_planilha(self):
+        with tempfile.TemporaryDirectory() as pasta:
+            caminho = Path(pasta) / "tag_invalida.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws["B1"] = date(2026, 8, 1)
+            ws["E1"] = date(2026, 9, 18)
+            self._preencher_registro_minimo(ws)
+            ws.cell(4, 4).value = "()#"
+            wb.save(caminho)
+            self.assertIn("TAG vazia após remover", " ".join(ler_planilha(caminho).erros))
+            ws.cell(4, 4).value = "A" * 41
+            wb.save(caminho)
+            self.assertIn("excede 40", " ".join(ler_planilha(caminho).erros))
+
     def test_cnpj_com_zero_inicial_e_reconstruido(self):
         inscricao, erro = normalizar_inscricao("CNPJ", 3492162000182)
         self.assertIsNone(erro)

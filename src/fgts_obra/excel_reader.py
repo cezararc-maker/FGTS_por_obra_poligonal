@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,18 @@ CABECALHOS_OBRIGATORIOS = {
     "FGTS",
     "FGTS Aprendiz",
 }
+
+
+# Caracteres aceitos pelo campo TAG do FGTS Digital (limite de 40).
+_CARACTERES_TAG = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 $:%*+-./")
+
+
+def normalizar_tag(valor: Any) -> str:
+    texto = unicodedata.normalize("NFKD", str(valor or "").strip().upper())
+    texto = "".join(letra for letra in texto if not unicodedata.combining(letra))
+    return " ".join(
+        "".join(letra for letra in texto if letra in _CARACTERES_TAG).split()
+    )
 
 
 def _digitos(valor: Any) -> str:
@@ -141,7 +154,8 @@ def ler_planilha(caminho: str | Path) -> ResultadoPlanilha:
         codigo = str(valores.get("Codigo") or "").strip()
         tipo = str(valores.get("Tipo Inscrição") or "").strip().upper()
         servico = str(valores.get("Servico") or "").strip()
-        tag = str(valores.get("TAG") or "").strip()
+        tag_original = str(valores.get("TAG") or "").strip()
+        tag = normalizar_tag(tag_original)
         inscricao, erro_inscricao = normalizar_inscricao(tipo, valores.get("Inscrição"))
 
         erros_linha: list[str] = []
@@ -150,7 +164,9 @@ def ler_planilha(caminho: str | Path) -> ResultadoPlanilha:
         if not servico:
             erros_linha.append("Servico vazio")
         if not tag:
-            erros_linha.append("TAG vazia")
+            erros_linha.append("TAG vazia após remover caracteres não aceitos")
+        elif len(tag) > 40:
+            erros_linha.append(f"TAG excede 40 caracteres após normalização ({len(tag)})")
         if erro_inscricao:
             erros_linha.append(erro_inscricao)
 
@@ -168,6 +184,8 @@ def ler_planilha(caminho: str | Path) -> ResultadoPlanilha:
         vistos_codigo.add(codigo)
         vistos_inscricao.add(inscricao)
         vistos_tag.add(tag)
+        if tag != tag_original:
+            resultado.avisos.append(f"Linha {linha}: TAG ajustada de {tag_original!r} para {tag!r}.")
 
         resultado.itens.append(
             ItemPlanilha(

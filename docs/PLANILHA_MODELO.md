@@ -49,9 +49,7 @@ Valores aceitos inicialmente para `Tipo Inscrição`: `CNPJ` e `CNO`.
 
 ## TAG
 
-A automação deve ler o valor resultante da coluna `TAG` e utilizá-lo no portal.
-
-Qualquer futura normalização, truncamento ou remoção de caracteres dependerá de limitação real observada no portal e aprovação do usuário.
+Na importação, a automação converte a TAG para maiúsculas, remove acentos e descarta caracteres não aceitos pelo portal. São mantidos letras A-Z, dígitos 0-9, espaços e `$ : % * + - . /`. Espaços repetidos são reduzidos a um. O painel mostra a TAG resultante e avisa quando houve ajuste. A planilha original não é alterada. TAG vazia, acima de 40 caracteres ou duplicada após a limpeza impede a validação; não há truncamento automático.
 
 ## Inscrição e zeros à esquerda
 
