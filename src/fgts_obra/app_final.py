@@ -43,17 +43,17 @@ class AppFGTSFinal(AppFGTS):
         ttk.Button(barra_selecao, text="Limpar seleção", command=self._limpar_selecao).pack(side="left", padx=8)
 
         self.btn_atualizar = ttk.Button(
-            self.btn_fase2.master, text="Atualizar situações", command=self._atualizar_situacoes,
+            self.acoes_adicionais, text="Atualizar situações", command=self._atualizar_situacoes,
         )
         self.btn_atualizar.pack(side="left", padx=8)
 
         self.btn_recuperada = ttk.Button(
-            self.btn_fase2.master, text="Registrar guia recuperada", command=self._registrar_recuperada,
+            self.acoes_adicionais, text="Registrar guia recuperada", command=self._registrar_recuperada,
         )
         self.btn_recuperada.pack(side="left", padx=8)
 
         self.btn_parar = ttk.Button(
-            self.btn_fase2.master,
+            self.acoes_adicionais,
             text="Parar após a atual",
             command=self._solicitar_parada,
             state="disabled",
@@ -61,7 +61,7 @@ class AppFGTSFinal(AppFGTS):
         self.btn_parar.pack(side="left", padx=8)
 
         self.btn_zip = ttk.Button(
-            self.btn_fase2.master,
+            self.acoes_adicionais,
             text="Gerar ZIP da competência",
             command=self._gerar_zip_manual,
             state="disabled",

@@ -69,7 +69,12 @@ class AppFGTS(tk.Tk):
         tabela_frame.columnconfigure(0, weight=1)
         tabela_frame.rowconfigure(0, weight=1)
 
-        acoes = ttk.Frame(self, padding=(10, 0, 10, 10))
+        status_linha = ttk.Frame(self, padding=(10, 0, 10, 4))
+        status_linha.pack(fill="x")
+        ttk.Label(status_linha, text="Processamento:").pack(side="left", padx=(0, 8))
+        ttk.Label(status_linha, textvariable=self.status_var, width=100, anchor="w").pack(side="left")
+
+        acoes = ttk.Frame(self, padding=(10, 0, 10, 4))
         acoes.pack(fill="x")
 
         self.btn_preparar = ttk.Button(
@@ -101,7 +106,8 @@ class AppFGTS(tk.Tk):
         )
         self.btn_fase2.pack(side="left", padx=8)
 
-        ttk.Label(acoes, textvariable=self.status_var).pack(side="left", padx=12)
+        self.acoes_adicionais = ttk.Frame(self, padding=(10, 0, 10, 6))
+        self.acoes_adicionais.pack(fill="x")
 
         log_frame = ttk.LabelFrame(self, text="Log do teste", padding=8)
         log_frame.pack(fill="both", padx=10, pady=(0, 10))
