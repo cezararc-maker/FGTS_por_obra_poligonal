@@ -99,6 +99,14 @@ def executar_item_producao(page, *, item: ItemPlanilha, competencia: str, vencim
     p5._pasta_downloads = lambda _competencia, _inscricao: destino
     p5._salvar_guia_automatica = _salvar_guia_direto
 
+    emissao_iniciada = False
+
+    def registrar(mensagem: str) -> None:
+        nonlocal emissao_iniciada
+        if "Emitindo a guia e monitorando" in mensagem:
+            emissao_iniciada = True
+        _log_operacional(log, total, indice)(mensagem)
+
     try:
         resultado = p5.executar_fase5(
             page,
@@ -107,7 +115,7 @@ def executar_item_producao(page, *, item: ItemPlanilha, competencia: str, vencim
             competencia=competencia,
             vencimento=vencimento,
             tag=item.tag,
-            log=_log_operacional(log, total, indice),
+            log=registrar,
         )
         salvar_status(
             competencia,
@@ -125,7 +133,7 @@ def executar_item_producao(page, *, item: ItemPlanilha, competencia: str, vencim
             competencia,
             item.tipo_inscricao,
             item.inscricao,
-            status="ERRO",
+            status="CONFERIR_EMISSAO" if emissao_iniciada else "ERRO",
             erro=str(exc),
         )
         raise

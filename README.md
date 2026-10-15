@@ -37,10 +37,10 @@ O nome histórico do instalador foi mantido para compatibilidade. Ele prepara o 
 
 ## Abrir o Chrome dedicado
 
-Em um PowerShell separado:
+No painel principal, use **Abrir Chrome dedicado**. Também é possível abrir em um PowerShell separado:
 
 ```powershell
-.\scripts\abrir_chrome_teste.bat
+.\scripts\abrir_chrome.bat
 ```
 
 No Chrome aberto pelo script:
@@ -63,7 +63,10 @@ A interface principal permite:
 - conferir a seleção antes da emissão;
 - gerar guias em sequência;
 - solicitar `Parar após a atual`;
-- impedir repetição de inscrições já concluídas no checkpoint;
+- mostrar na primeira coluna o estado de cada inscrição, incluindo PDF da guia e relatório FGTS registrados;
+- atualizar as situações pelo botão **Atualizar situações**;
+- registrar manualmente um PDF de guia recuperada sem marcar relatórios ou lote como concluídos;
+- impedir repetição de inscrições já concluídas ou com emissão pendente de conferência no checkpoint;
 - gerar manualmente o ZIP da competência.
 
 ## Fluxo operacional
@@ -112,7 +115,7 @@ O controle persistente fica na pasta da competência:
 %USERPROFILE%\Downloads\FGTS_por_obra_poligonal\<MM-AAAA>\controle_lote.json
 ```
 
-Uma inscrição marcada como `CONCLUIDO` não é reemitida automaticamente se for selecionada novamente.
+Inscrições marcadas como `CONCLUIDO`, `CONFERIR_EMISSAO`, `GUIA_RECUPERADA`, `PROCESSANDO` ou com relatório pendente não são reemitidas automaticamente. Se a conexão com o Chrome falhar após o início da emissão, confira a guia no portal antes de nova tentativa. Para uma guia já emitida e recuperada pelo operador, selecione uma inscrição no painel e use **Registrar guia recuperada** para indicar o PDF. Esse registro não confirma os relatórios nem encerra o lote. O checkpoint e os PDFs são locais; `git pull` não os sincroniza entre máquinas.
 
 ## ZIP da competência
 
@@ -147,7 +150,7 @@ Quando todos os registros da planilha constarem como concluídos no checkpoint e
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Os testes cobrem regras de competência/vencimento, leitura da planilha, organização da pasta de saída e escopo do ZIP.
+Os testes cobrem regras de competência/vencimento, leitura da planilha, espera da grade após carregamento, organização da pasta de saída e escopo do ZIP. A validação funcional de setembro no portal ainda depende de nova execução assistida.
 
 ## Estrutura relevante
 

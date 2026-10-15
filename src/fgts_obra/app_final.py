@@ -3,10 +3,10 @@ from __future__ import annotations
 import threading
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from .app import AppFGTS
-from .batch_state import salvar_status, status_atual
+from .batch_state import carregar_controle, chave_item, registrar_guia_recuperada, salvar_status, status_atual
 from .browser_connection import BrowserSession
 from .phase5_flow import DownloadRelatorioTimeout, _reiniciar
 from .phase6_flow import gerar_zip_competencia, pasta_competencia
@@ -18,6 +18,10 @@ class AppFGTSFinal(AppFGTS):
     def __init__(self) -> None:
         super().__init__()
         self.title("FGTS por Obra / Poligonal")
+        self.tabela.heading("codigo", text="Código")
+        self.tabela["columns"] = ("situacao", "linha", "codigo", "tipo", "inscricao", "servico", "tag")
+        self.tabela.heading("situacao", text="Situação da guia")
+        self.tabela.column("situacao", width=250, minwidth=180, anchor="w")
         self.tabela.configure(selectmode="extended")
 
         self.btn_preparar.configure(text="Conferir seleção", command=self._conferir_selecao)
@@ -25,6 +29,16 @@ class AppFGTSFinal(AppFGTS):
 
         self._parar_apos_atual = threading.Event()
         self._executando = False
+
+        self.btn_atualizar = ttk.Button(
+            self.btn_fase2.master, text="Atualizar situações", command=self._atualizar_situacoes,
+        )
+        self.btn_atualizar.pack(side="left", padx=8)
+
+        self.btn_recuperada = ttk.Button(
+            self.btn_fase2.master, text="Registrar guia recuperada", command=self._registrar_recuperada,
+        )
+        self.btn_recuperada.pack(side="left", padx=8)
 
         self.btn_parar = ttk.Button(
             self.btn_fase2.master,
@@ -47,6 +61,68 @@ class AppFGTSFinal(AppFGTS):
         if self.resultado is not None and self.resultado.valida:
             self.btn_zip.configure(state="normal")
             self.status_var.set("Planilha validada. Selecione uma ou mais inscrições para gerar as guias.")
+            self._atualizar_situacoes()
+
+    def _atualizar_situacoes(self) -> None:
+        if self.resultado is None or not self.resultado.valida:
+            return
+        dados = carregar_controle(self.resultado.competencia)
+        for item in self.resultado.itens:
+            registro = dados.get(chave_item(self.resultado.competencia, item.tipo_inscricao, item.inscricao), {})
+            status = registro.get("status")
+            guia = registro.get("guia")
+            guia_baixada = bool(guia and Path(guia).is_file())
+            fgts = registro.get("fgts")
+            fgts_baixado = bool(fgts and Path(fgts).is_file())
+            if status == "CONCLUIDO":
+                situacao = "Concluída" if guia_baixada and fgts_baixado else "Concluída; conferir arquivos"
+            elif status == "GUIA_RECUPERADA":
+                situacao = "Guia recuperada; relatórios pendentes"
+            elif status == "CONFERIR_EMISSAO":
+                situacao = "Conferir emissão; NÃO repetir"
+            elif status in {"PENDENTE_RELATORIO", "PENDENTE_RELATORIO_CONTINUADO"}:
+                situacao = "Emitida; relatório pendente"
+            elif status == "PROCESSANDO":
+                situacao = "Em processamento; conferir se parou"
+            elif status == "ERRO":
+                situacao = "Erro; verificar antes de repetir"
+            else:
+                situacao = "Pendente"
+            if guia_baixada:
+                situacao += " | PDF da guia: sim"
+            if fgts_baixado:
+                situacao += " | Relatório: sim"
+            linha = str(item.linha)
+            if self.tabela.exists(linha):
+                self.tabela.item(linha, values=(situacao, item.linha, item.codigo, item.tipo_inscricao,
+                                                item.inscricao, item.servico, item.tag))
+
+    def _registrar_recuperada(self) -> None:
+        itens = self._itens_selecionados()
+        if len(itens) != 1 or self.resultado is None:
+            messagebox.showwarning("Registrar guia", "Selecione uma única inscrição.")
+            return
+        item = itens[0]
+        atual = status_atual(self.resultado.competencia, item.tipo_inscricao, item.inscricao)
+        if atual == "CONCLUIDO":
+            messagebox.showinfo("Registrar guia", "Esta inscrição já está concluída.")
+            return
+        pdf = filedialog.askopenfilename(title="Selecione o PDF da guia recuperada", filetypes=[("PDF", "*.pdf")])
+        if not pdf:
+            return
+        numero = simpledialog.askstring("Número da guia", "Número da guia (deixe vazio se não souber):", parent=self)
+        if numero is None:
+            return
+        if not messagebox.askyesno("Confirmar registro", f"Registrar guia recuperada para {item.tipo_inscricao} {item.inscricao}?\n\n{pdf}\n\nIsso não marcará os relatórios como baixados nem o lote como concluído."):
+            return
+        try:
+            registrar_guia_recuperada(self.resultado.competencia, item.tipo_inscricao, item.inscricao,
+                                      numero_guia=numero.strip() or None, guia=pdf)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Registrar guia", str(exc))
+            return
+        self._atualizar_situacoes()
+        self._registrar(f"Guia recuperada registrada para {item.tipo_inscricao} {item.inscricao}.")
 
     def _itens_selecionados(self):
         if self.resultado is None:
@@ -125,11 +201,11 @@ class AppFGTSFinal(AppFGTS):
 
         concluidos = [
             item for item in itens
-            if status_atual(self.resultado.competencia, item.tipo_inscricao, item.inscricao) == "CONCLUIDO"
+            if status_atual(self.resultado.competencia, item.tipo_inscricao, item.inscricao) in {"CONCLUIDO", "CONFERIR_EMISSAO", "GUIA_RECUPERADA", "PROCESSANDO", "PENDENTE_RELATORIO", "PENDENTE_RELATORIO_CONTINUADO"}
         ]
         pendentes = [item for item in itens if item not in concluidos]
         if not pendentes:
-            messagebox.showinfo("Processamento", "Todas as inscrições selecionadas já estão concluídas no checkpoint.")
+            messagebox.showinfo("Processamento", "As inscrições selecionadas já foram concluídas ou exigem conferência antes de nova emissão.")
             return
 
         linhas = "\n".join(
@@ -138,7 +214,7 @@ class AppFGTSFinal(AppFGTS):
         )
         complemento = ""
         if concluidos:
-            complemento = f"\n\n{len(concluidos)} inscrição(ões) já concluída(s) será(ão) ignorada(s)."
+            complemento = f"\n\n{len(concluidos)} inscrição(ões) concluída(s) ou em conferência será(ão) ignorada(s)."
 
         if not messagebox.askyesno(
             "Confirmar geração",
@@ -229,6 +305,7 @@ class AppFGTSFinal(AppFGTS):
                     except Exception:
                         pass
                     detalhe = str(exc)
+                    self._log_worker(f"[{indice}/{total}] Interrompido: {detalhe}")
                     if screenshot:
                         detalhe += f"\nScreenshot: {screenshot}"
                     self._mostrar_worker(
@@ -239,6 +316,8 @@ class AppFGTSFinal(AppFGTS):
                     )
                     interrompido = True
                     break
+
+                self.after(0, self._atualizar_situacoes)
 
                 if self._parar_apos_atual.is_set():
                     interrompido = True
@@ -278,6 +357,7 @@ class AppFGTSFinal(AppFGTS):
                 self.btn_chrome.configure(state="normal")
                 self.btn_preparar.configure(state="normal")
                 self.btn_zip.configure(state="normal")
+                self._atualizar_situacoes()
             self.after(0, liberar)
 
 

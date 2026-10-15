@@ -60,24 +60,50 @@ def _detectar_grade_resultados(page: Page, inscricao: str, competencia: str) -> 
     return None
 
 
-def _aguardar_grade(page: Page, inscricao: str, competencia: str, timeout_ms: int = 20_000) -> int | None:
+def _aguardar_grade(page: Page, inscricao: str, competencia: str, timeout_ms: int = 60_000) -> int | None:
+    """Aguarda carregamento e controles utilizáveis antes de selecionar débitos."""
     limite = time.monotonic() + timeout_ms / 1000
+    pronta_desde: float | None = None
+    assinatura_anterior = None
     while time.monotonic() < limite:
-        total = _detectar_grade_resultados(page, inscricao, competencia)
-        if total is not None:
-            return total
-        texto = _normalizar(_texto_pagina(page))
-        if (
-            "Seleção de Débitos" in texto
-            and "Competência de Apuração" in texto
-            and competencia in texto
-            and pf._digitos(inscricao) in pf._digitos(texto)
-        ):
-            return None
+        carregando = pf._visiveis(
+            page.get_by_text(re.compile(r"^Carregando(?:\.\.\.|…)?$", re.IGNORECASE))
+        )
+        pronta = False
+        total = None
+        assinatura = None
+        if not carregando:
+            total = _detectar_grade_resultados(page, inscricao, competencia)
+            texto = _normalizar(_texto_pagina(page))
+            contexto = (
+                "Seleção de Débitos" in texto
+                and "Competência de Apuração" in texto
+                and competencia in texto
+                and pf._digitos(inscricao) in pf._digitos(texto)
+            )
+            if contexto and total != 0:
+                try:
+                    geral, linhas = _checkboxes_grade(page)
+                    pronta = geral.is_enabled() and all(linha.is_enabled() for linha in linhas)
+                    assinatura = (total, len(linhas))
+                except pf.PortalFlowError:
+                    # A grade pode existir antes de suas linhas serem renderizadas.
+                    pass
+        if pronta:
+            agora = time.monotonic()
+            if pronta_desde is None or assinatura != assinatura_anterior:
+                pronta_desde = agora
+            elif agora - pronta_desde >= 0.75:
+                return total
+        else:
+            pronta_desde = None
+        assinatura_anterior = assinatura
         page.wait_for_timeout(250)
 
     raise pf.PortalFlowError(
-        "A pesquisa foi enviada, mas a grade real de débitos não pôde ser confirmada em até 20 segundos."
+        f"A pesquisa foi enviada, mas a grade de débitos não ficou pronta para seleção "
+        f"em até {timeout_ms / 1000:g} segundos. Aguarde o carregamento do portal e confira "
+        "se a pesquisa retornou débitos. Nenhuma seleção foi realizada nesta etapa."
     )
 
 

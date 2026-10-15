@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -74,6 +75,11 @@ class AppFGTS(tk.Tk):
             state="disabled",
         )
         self.btn_preparar.pack(side="left")
+
+        self.btn_abrir_chrome = ttk.Button(
+            acoes, text="Abrir Chrome dedicado", command=self._abrir_chrome,
+        )
+        self.btn_abrir_chrome.pack(side="left", padx=8)
 
         self.btn_chrome = ttk.Button(
             acoes,
@@ -219,6 +225,15 @@ class AppFGTS(tk.Tk):
         self._registrar(
             f"Teste preparado: linha {item.linha}, {item.tipo_inscricao} {item.inscricao}, TAG '{item.tag}'."
         )
+
+    def _abrir_chrome(self) -> None:
+        script = Path(__file__).resolve().parents[2] / "scripts" / "abrir_chrome.bat"
+        try:
+            subprocess.Popen([str(script)], cwd=str(script.parent), creationflags=subprocess.CREATE_NEW_CONSOLE)
+        except OSError as exc:
+            messagebox.showerror("Abrir Chrome", str(exc))
+            return
+        self._registrar("Chrome dedicado solicitado. Entre no FGTS Digital e faça a autenticação manualmente.")
 
     def _testar_chrome(self) -> None:
         self._registrar("Tentando conectar ao Chrome dedicado em 127.0.0.1:9222...")

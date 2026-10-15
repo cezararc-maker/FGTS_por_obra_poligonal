@@ -81,6 +81,32 @@ def salvar_status(
     caminho.write_text(json.dumps(dados, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def registro_item(competencia: str, tipo_inscricao: str, inscricao: str) -> dict[str, Any]:
+    return carregar_controle(competencia).get(chave_item(competencia, tipo_inscricao, inscricao), {})
+
+
+def registrar_guia_recuperada(
+    competencia: str, tipo_inscricao: str, inscricao: str, *,
+    numero_guia: str | None, guia: str,
+) -> None:
+    """Registra confirmação manual sem declarar relatórios ou lote concluídos."""
+    pdf = Path(guia)
+    if not pdf.is_file() or pdf.stat().st_size == 0:
+        raise ValueError("O PDF selecionado não existe ou está vazio.")
+    with pdf.open("rb") as arquivo:
+        if arquivo.read(5) != b"%PDF-":
+            raise ValueError("O arquivo selecionado não é um PDF válido.")
+    atual = registro_item(competencia, tipo_inscricao, inscricao)
+    if atual.get("status") == "CONCLUIDO":
+        raise ValueError("Esta inscrição já está concluída no controle.")
+    salvar_status(
+        competencia, tipo_inscricao, inscricao, status="GUIA_RECUPERADA",
+        numero_guia=numero_guia or atual.get("numero_guia"), guia=str(pdf.resolve()),
+        fgts=atual.get("fgts"), consignado=atual.get("consignado"),
+        erro="Guia confirmada manualmente; relatórios e conclusão ainda pendentes.",
+    )
+
+
 def status_atual(competencia: str, tipo_inscricao: str, inscricao: str) -> str | None:
     dados = carregar_controle(competencia)
     item = dados.get(chave_item(competencia, tipo_inscricao, inscricao))
