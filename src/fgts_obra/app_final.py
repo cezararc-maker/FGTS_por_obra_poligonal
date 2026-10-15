@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import tkinter as tk
+import unicodedata
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
@@ -13,6 +14,14 @@ from .phase5_flow import DownloadRelatorioTimeout, _reiniciar
 from .phase6_flow import gerar_zip_competencia, pasta_competencia
 from .portal_flow import salvar_screenshot_erro
 from .production_flow import executar_item_producao
+
+
+def _chave_ordenacao(coluna: str, valor: object):
+    texto = str(valor or "").strip()
+    if coluna in {"linha", "codigo"} and texto.isdecimal():
+        return (0, int(texto))
+    normalizado = unicodedata.normalize("NFKD", texto.casefold())
+    return (1, "".join(ch for ch in normalizado if not unicodedata.combining(ch)))
 
 
 class AppFGTSFinal(AppFGTS):
@@ -75,9 +84,30 @@ class AppFGTSFinal(AppFGTS):
         titulos = ("Situação da guia", "Linha", "Código", "Tipo", "Inscrição", "Serviço", "TAG")
         larguras = (250, 60, 90, 90, 150, 430, 220)
         self.tabela["columns"] = colunas
+        self._titulos_colunas = dict(zip(colunas, titulos))
+        self._ordenacao_coluna = None
+        self._ordenacao_desc = False
         for coluna, titulo, largura in zip(colunas, titulos, larguras):
-            self.tabela.heading(coluna, text=titulo)
+            self.tabela.heading(coluna, text=titulo, command=lambda c=coluna: self._ordenar_coluna(c))
             self.tabela.column(coluna, width=largura, anchor="w")
+
+    def _ordenar_coluna(self, coluna: str) -> None:
+        if self._executando:
+            return
+        descendente = not self._ordenacao_desc if self._ordenacao_coluna == coluna else False
+        posicao = tuple(self.tabela["columns"]).index(coluna)
+        linhas = list(self.tabela.get_children())
+        linhas.sort(
+            key=lambda iid: _chave_ordenacao(coluna, self.tabela.item(iid, "values")[posicao]),
+            reverse=descendente,
+        )
+        for indice, iid in enumerate(linhas):
+            self.tabela.move(iid, "", indice)
+        self._ordenacao_coluna = coluna
+        self._ordenacao_desc = descendente
+        for nome, titulo in self._titulos_colunas.items():
+            seta = " ▼" if descendente else " ▲"
+            self.tabela.heading(nome, text=titulo + seta if nome == coluna else titulo)
 
     def _validar_planilha(self, caminho: Path) -> None:
         super()._validar_planilha(caminho)
@@ -182,8 +212,10 @@ class AppFGTSFinal(AppFGTS):
     def _itens_selecionados(self):
         if self.resultado is None:
             return []
-        linhas = {int(iid) for iid in self.tabela.selection()}
-        return [item for item in self.resultado.itens if item.linha in linhas]
+        por_linha = {str(item.linha): item for item in self.resultado.itens}
+        selecionados = set(self.tabela.selection())
+        return [por_linha[iid] for iid in self.tabela.get_children()
+                if iid in selecionados and iid in por_linha]
 
     def _conferir_selecao(self) -> None:
         itens = self._itens_selecionados()
