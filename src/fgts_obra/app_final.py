@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-import os
+import multiprocessing
+import queue
 import threading
+import time
 import tkinter as tk
 import unicodedata
 from pathlib import Path
@@ -15,6 +17,29 @@ from .phase5_flow import DownloadRelatorioTimeout, _reiniciar
 from .phase6_flow import gerar_zip_competencia, pasta_competencia
 from .portal_flow import salvar_screenshot_erro
 from .production_flow import executar_item_producao
+
+
+class ParadaImediata(Exception):
+    pass
+
+
+def _executar_item_em_processo(eventos, item, competencia, vencimento, indice, total):
+    sessao = BrowserSession()
+    try:
+        sessao.conectar()
+        resultado = executar_item_producao(
+            sessao.page, item=item, competencia=competencia, vencimento=vencimento,
+            log=lambda mensagem: eventos.put(("log", mensagem)), indice=indice, total=total,
+        )
+        eventos.put(("concluido", (resultado.numero_guia, resultado.guia.caminho)))
+    except SemDebitos:
+        eventos.put(("sem_debitos", None))
+    except DownloadRelatorioTimeout as exc:
+        eventos.put(("relatorio_timeout", (exc.tipo, str(exc))))
+    except Exception as exc:
+        eventos.put(("erro", str(exc)))
+    finally:
+        sessao.fechar_conexao()
 
 
 def _chave_ordenacao(coluna: str, valor: object):
@@ -36,6 +61,8 @@ class AppFGTSFinal(AppFGTS):
         self.btn_fase2.configure(text="Gerar guias selecionadas", command=self._iniciar_lote)
 
         self._parar_apos_atual = threading.Event()
+        self._parar_agora = threading.Event()
+        self._processo_item = None
         self._executando = False
 
         barra_selecao = ttk.Frame(self.tabela.master, padding=(0, 6, 0, 0))
@@ -245,9 +272,9 @@ class AppFGTSFinal(AppFGTS):
     def _parar_imediatamente(self) -> None:
         if not self._executando:
             return
-        # Encerra somente este processo Python. O Chrome dedicado permanece aberto.
-        # O checkpoint PROCESSANDO exige conferência no portal antes de repetir a inscrição.
-        os._exit(130)
+        self._parar_agora.set()
+        self.btn_parar_agora.configure(state="disabled")
+        self._registrar("Parada imediata solicitada. Encerrando somente a automação; confira a inscrição atual no portal.")
 
     def _log_worker(self, mensagem: str) -> None:
         self.after(0, lambda m=mensagem: self._registrar(m))
@@ -329,6 +356,7 @@ class AppFGTSFinal(AppFGTS):
 
         self._executando = True
         self._parar_apos_atual.clear()
+        self._parar_agora.clear()
         self.btn_fase2.configure(state="disabled")
         self.btn_parar.configure(state="normal")
         self.btn_parar_agora.configure(state="normal")
@@ -338,6 +366,64 @@ class AppFGTSFinal(AppFGTS):
         self.btn_selecionar_pendentes.configure(state="disabled")
         self.btn_gerar_todas.configure(state="disabled")
         threading.Thread(target=self._worker_lote, args=(pendentes,), daemon=True).start()
+
+    def _executar_item_isolado(self, item, indice, total):
+        contexto = multiprocessing.get_context("spawn")
+        eventos = contexto.Queue()
+        processo = contexto.Process(
+            target=_executar_item_em_processo,
+            args=(eventos, item, self.resultado.competencia,
+                  self.resultado.vencimento_calculado, indice, total),
+            daemon=True,
+        )
+        self._processo_item = processo
+        try:
+            processo.start()
+            resposta = None
+            terminou_em = None
+            while True:
+                if self._parar_agora.is_set():
+                    if processo.is_alive():
+                        processo.terminate()
+                    processo.join(timeout=2)
+                    salvar_status(
+                        self.resultado.competencia, item.tipo_inscricao, item.inscricao,
+                        status="CONFERIR_EMISSAO",
+                        erro="Parada imediata solicitada; conferir no portal antes de repetir.",
+                    )
+                    raise ParadaImediata()
+                try:
+                    tipo, valor = eventos.get(timeout=0.1)
+                except queue.Empty:
+                    if processo.is_alive():
+                        terminou_em = None
+                    elif terminou_em is None:
+                        terminou_em = time.monotonic()
+                    elif time.monotonic() - terminou_em >= 1:
+                        break
+                    continue
+                if tipo == "log":
+                    self._log_worker(valor)
+                else:
+                    resposta = (tipo, valor)
+                    break
+            processo.join(timeout=2)
+            if resposta is None:
+                raise RuntimeError(f"A automação da inscrição terminou sem resultado (código {processo.exitcode}). Confira o portal.")
+            tipo, valor = resposta
+            if tipo == "concluido":
+                return valor
+            if tipo == "sem_debitos":
+                raise SemDebitos("Nenhum item encontrado")
+            if tipo == "relatorio_timeout":
+                raise DownloadRelatorioTimeout(valor[0])
+            raise RuntimeError(valor)
+        finally:
+            if processo.is_alive():
+                processo.terminate()
+                processo.join(timeout=2)
+            self._processo_item = None
+            eventos.close()
 
     def _worker_lote(self, itens) -> None:
         sessao = BrowserSession()
@@ -354,7 +440,7 @@ class AppFGTSFinal(AppFGTS):
             total = len(itens)
 
             for indice, item in enumerate(itens, start=1):
-                if self._parar_apos_atual.is_set() and indice > 1:
+                if self._parar_agora.is_set() or (self._parar_apos_atual.is_set() and indice > 1):
                     interrompido = True
                     break
 
@@ -362,20 +448,17 @@ class AppFGTSFinal(AppFGTS):
                     f"===== {indice}/{total} | {item.tipo_inscricao} {item.inscricao} | {item.codigo} - {item.servico} ====="
                 )
                 try:
-                    resultado = executar_item_producao(
-                        sessao.page,
-                        item=item,
-                        competencia=self.resultado.competencia,
-                        vencimento=self.resultado.vencimento_calculado,
-                        log=self._log_worker,
-                        indice=indice,
-                        total=total,
-                    )
+                    numero_guia, caminho_guia = self._executar_item_isolado(item, indice, total)
                     concluidos += 1
                     self._log_worker(
-                        f"[{indice}/{total}] CONCLUÍDO | Guia {resultado.numero_guia or 'número não identificado'} | "
-                        f"Pasta: {Path(resultado.guia.caminho).parent if resultado.guia.caminho else '-'}"
+                        f"[{indice}/{total}] CONCLUÍDO | Guia {numero_guia or 'número não identificado'} | "
+                        f"Pasta: {Path(caminho_guia).parent if caminho_guia else '-'}"
                     )
+
+                except ParadaImediata:
+                    interrompido = True
+                    self._log_worker(f"[{indice}/{total}] PARADA IMEDIATA | Confira a emissão no portal antes de repetir.")
+                    break
 
                 except SemDebitos as exc:
                     sem_debitos += 1
@@ -443,7 +526,7 @@ class AppFGTSFinal(AppFGTS):
                 pass
 
             zip_criado = None
-            if not interrompido and erros == 0 and pendencias == 0 and self._todos_concluidos():
+            if not interrompido and not self._parar_agora.is_set() and erros == 0 and pendencias == 0 and self._todos_concluidos():
                 try:
                     zip_criado = gerar_zip_competencia(self.resultado.competencia)
                     self._log_worker(f"ZIP da competência criado: {zip_criado}")

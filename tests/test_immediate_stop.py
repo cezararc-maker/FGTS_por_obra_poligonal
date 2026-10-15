@@ -1,21 +1,29 @@
+import threading
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock
 
 from fgts_obra.app_final import AppFGTSFinal
 
 
 class ImmediateStopTests(unittest.TestCase):
-    @patch('fgts_obra.app_final.os._exit')
-    def test_stops_only_when_lot_is_running(self, exit_process):
-        idle = SimpleNamespace(_executando=False)
-        AppFGTSFinal._parar_imediatamente(idle)
-        exit_process.assert_not_called()
+    def test_parada_mantem_janela_e_sinaliza_worker(self):
+        evento = threading.Event()
+        app = SimpleNamespace(
+            _executando=True, _parar_agora=evento,
+            btn_parar_agora=Mock(), _registrar=Mock(),
+        )
+        AppFGTSFinal._parar_imediatamente(app)
+        self.assertTrue(evento.is_set())
+        app.btn_parar_agora.configure.assert_called_once_with(state="disabled")
+        app._registrar.assert_called_once()
 
-        running = SimpleNamespace(_executando=True)
-        AppFGTSFinal._parar_imediatamente(running)
-        exit_process.assert_called_once_with(130)
+    def test_parada_nao_faz_nada_sem_lote(self):
+        evento = threading.Event()
+        app = SimpleNamespace(_executando=False, _parar_agora=evento)
+        AppFGTSFinal._parar_imediatamente(app)
+        self.assertFalse(evento.is_set())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

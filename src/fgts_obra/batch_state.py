@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -78,7 +80,20 @@ def salvar_status(
         "erro": erro,
         "atualizado_em": datetime.now().isoformat(timespec="seconds"),
     }
-    caminho.write_text(json.dumps(dados, ensure_ascii=False, indent=2), encoding="utf-8")
+    # A parada imediata pode encerrar o processo no meio desta escrita.
+    # A substituição atômica preserva o último checkpoint íntegro.
+    temporario = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=caminho.parent,
+            prefix="controle_lote_", suffix=".tmp", delete=False,
+        ) as arquivo:
+            temporario = Path(arquivo.name)
+            json.dump(dados, arquivo, ensure_ascii=False, indent=2)
+        os.replace(temporario, caminho)
+    finally:
+        if temporario is not None:
+            temporario.unlink(missing_ok=True)
 
 
 def registro_item(competencia: str, tipo_inscricao: str, inscricao: str) -> dict[str, Any]:
