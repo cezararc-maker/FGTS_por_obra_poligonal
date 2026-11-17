@@ -124,42 +124,26 @@ def _aguardar_etapa_emitir_guia(page: Page, timeout_ms: int = 90_000) -> None:
 
 def _clicar_emitir_guia_seguro(page: Page, timeout_ms: int = 90_000) -> None:
     limite = time.monotonic() + timeout_ms / 1000
-    provas_consecutivas = 0
 
     while time.monotonic() < limite:
         if _overlay_carregamento_visivel(page):
-            provas_consecutivas = 0
             page.wait_for_timeout(250)
             continue
 
         botao = _localizar_botao_emitir(page)
         if botao is None:
-            provas_consecutivas = 0
             page.wait_for_timeout(250)
             continue
 
         try:
             botao.evaluate("el => el.scrollIntoView({block: 'center', inline: 'nearest', behavior: 'instant'})")
             page.wait_for_timeout(300)
-            botao.click(trial=True, timeout=1_500)
-            provas_consecutivas += 1
-
-            if provas_consecutivas < 2:
-                page.wait_for_timeout(350)
-                continue
-
-            botao = _localizar_botao_emitir(page)
-            if botao is None or _overlay_carregamento_visivel(page):
-                provas_consecutivas = 0
-                continue
-
+            # Um único clique real, equivalente à ação manual no mesmo botão.
             botao.click(timeout=5_000)
             return
         except PlaywrightTimeoutError:
-            provas_consecutivas = 0
             page.wait_for_timeout(300)
         except Exception:
-            provas_consecutivas = 0
             page.wait_for_timeout(300)
 
     raise pf.PortalFlowError(
