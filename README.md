@@ -43,7 +43,7 @@ No painel principal, use **Abrir Chrome dedicado**. Também é possível abrir e
 .\scripts\abrir_chrome.bat
 ```
 
-O Chrome dedicado abre diretamente `https://fgtsdigital.sistema.gov.br/cobranca/`. Se o portal redirecionar para autenticação, conclua-a manualmente.
+O Chrome dedicado abre diretamente `https://fgtsdigital.sistema.gov.br/cobranca/`. Cada nova sessão usa um perfil temporário e limpo, sem reaproveitar cookies, cache, extensões ou preferências de downloads da sessão anterior. Se já houver um Chrome dedicado aberto, feche somente essa janela antes de solicitar uma nova sessão. Se o portal redirecionar para autenticação, conclua-a manualmente.
 
 No Chrome aberto pelo script:
 
@@ -94,9 +94,10 @@ Para cada inscrição selecionada, a aplicação:
 8. valida o vencimento;
 9. preenche a TAG normalizada na importação da planilha (caracteres não aceitos são removidos e o ajuste aparece no painel);
 10. emite a guia;
-11. confirma a emissão pelo número dinâmico e/ou estado final do portal;
-12. salva a própria guia e os relatórios;
-13. reinicia o fluxo para a próxima inscrição.
+11. confirma a emissão pelo número dinâmico e/ou estado final do portal, sem repetir o clique de emissão;
+12. se o portal não disparar o PDF automaticamente, tenta recuperá-lo pelo link do número da guia emitida; sem PDF recuperado, registra a inscrição para conferência em vez de marcá-la como concluída;
+13. salva a própria guia e os relatórios;
+14. reinicia o fluxo para a próxima inscrição.
 
 ## Pasta de saída
 

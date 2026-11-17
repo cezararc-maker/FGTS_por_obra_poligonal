@@ -261,6 +261,34 @@ def _aguardar_emissao_confirmada(
     )
 
 
+def _link_da_guia(page: Page, numero_guia: str) -> Locator | None:
+    """Localiza o link único que o portal expõe para a guia emitida."""
+    try:
+        candidatos = []
+        for link in pf._visiveis(page.locator("a")):
+            if _normalizar_numero_guia(link.inner_text()) == numero_guia:
+                candidatos.append(link)
+        return candidatos[0] if len(candidatos) == 1 else None
+    except Exception:
+        return None
+
+
+def _baixar_guia_pelo_link(page: Page, numero_guia: str) -> Download | None:
+    """Recupera o PDF pelo número da guia quando o portal não o baixa sozinho."""
+    link = _link_da_guia(page, numero_guia)
+    if link is None:
+        return None
+    try:
+        with page.expect_download(timeout=20_000) as info:
+            link.scroll_into_view_if_needed()
+            link.click()
+        return info.value
+    except PlaywrightTimeoutError:
+        return None
+    except Exception:
+        return None
+
+
 def _texto_elemento(locator: Locator) -> str:
     partes: list[str] = []
     try:
@@ -364,7 +392,10 @@ def _salvar_guia_automatica(
     numero_guia: str | None,
 ) -> ResultadoDownload:
     if download is None:
-        return ResultadoDownload(tipo="GUIA", status="DOWNLOAD AUTOMÁTICO NÃO CAPTURADO", caminho=None)
+        raise pf.PortalFlowError(
+            "A guia foi emitida, mas o PDF não foi recuperado automaticamente. "
+            "A inscrição ficará para conferência e não será marcada como concluída."
+        )
 
     pasta = _pasta_downloads(competencia, inscricao) / "GUIA"
     pasta.mkdir(parents=True, exist_ok=True)
@@ -480,6 +511,10 @@ def executar_fase5(
         log(f"Guia emitida confirmada. Número da guia: {numero_guia}.")
     else:
         log("Guia emitida confirmada pelo download automático + estado final do portal; número ainda não identificado.")
+
+    if download_guia is None and numero_guia:
+        log("O portal não iniciou o download automático; recuperando o PDF pelo link da guia emitida...")
+        download_guia = _baixar_guia_pelo_link(page, numero_guia)
 
     log("[6/8] Salvando a própria guia emitida em pasta controlada...")
     guia = _salvar_guia_automatica(download_guia, competencia, inscricao, numero_guia)

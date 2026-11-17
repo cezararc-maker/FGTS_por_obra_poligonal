@@ -32,7 +32,10 @@ def _salvar_guia_direto(
     numero_guia: str | None,
 ):
     if download is None:
-        return p5.ResultadoDownload(tipo="GUIA", status="DOWNLOAD AUTOMÁTICO NÃO CAPTURADO", caminho=None)
+        raise p5.pf.PortalFlowError(
+            "A guia foi emitida, mas o PDF não foi recuperado automaticamente. "
+            "A inscrição ficará para conferência e não será marcada como concluída."
+        )
 
     pasta = p5._pasta_downloads(competencia, inscricao)
     pasta.mkdir(parents=True, exist_ok=True)
