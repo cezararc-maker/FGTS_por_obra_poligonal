@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import re
+import shutil
 from pathlib import Path
-
-from playwright.sync_api import Download
 
 from . import phase5_flow as p5
 from .batch_state import salvar_status
@@ -26,7 +25,7 @@ def _arquivo_pdf(caminho: Path) -> bool:
 
 
 def _salvar_guia_direto(
-    download: Download | None,
+    download: Path | None,
     competencia: str,
     inscricao: str,
     numero_guia: str | None,
@@ -39,9 +38,9 @@ def _salvar_guia_direto(
 
     pasta = p5._pasta_downloads(competencia, inscricao)
     pasta.mkdir(parents=True, exist_ok=True)
-    destino = pasta / _nome_seguro(download.suggested_filename)
+    destino = pasta / _nome_seguro(download.name)
     try:
-        download.save_as(str(destino))
+        shutil.copy2(download, destino)
     except Exception as exc:
         raise p5.pf.PortalFlowError(f"A guia foi emitida, mas o download automático não pôde ser salvo: {exc}") from exc
 

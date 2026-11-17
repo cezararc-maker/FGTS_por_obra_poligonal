@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -189,88 +190,70 @@ def _extrair_numero_guia(page: Page) -> str | None:
     return normalizados[0] if len(normalizados) == 1 else None
 
 
-def _reiniciar_visivel(page: Page) -> bool:
+def _estado_downloads_portal() -> dict[Path, tuple[int, int]]:
+    """Fotografa os PDFs que o próprio Chrome já concluiu em Downloads."""
+    estado: dict[Path, tuple[int, int]] = {}
+    pasta = Path.home() / "Downloads"
     try:
-        return bool(pf._visiveis(page.get_by_role("button", name="Reiniciar", exact=True)))
-    except Exception:
-        return False
+        for arquivo in pasta.glob("*.pdf"):
+            dados = arquivo.stat()
+            estado[arquivo] = (dados.st_mtime_ns, dados.st_size)
+    except OSError:
+        pass
+    return estado
+
+
+def _novo_pdf_do_portal(antes: dict[Path, tuple[int, int]]) -> Path | None:
+    """Retorna somente PDF novo/concluído pelo Chrome, sem acionar download."""
+    candidatos: list[Path] = []
+    for arquivo, estado in _estado_downloads_portal().items():
+        if antes.get(arquivo) == estado or estado[1] <= 0:
+            continue
+        if _arquivo_pdf(arquivo):
+            candidatos.append(arquivo)
+    if not candidatos:
+        return None
+    return max(candidatos, key=lambda caminho: caminho.stat().st_mtime_ns)
 
 
 def _aguardar_emissao_confirmada(
     page: Page,
-    downloads_emitir: list[Download],
+    downloads_antes: dict[Path, tuple[int, int]],
     timeout_ms: int = 180_000,
-) -> tuple[str | None, Download | None]:
+) -> tuple[str | None, Path | None]:
     """Confirma a emissão por número da guia ou por prova alternativa forte.
 
     Prova principal: número dinâmico da guia no link ao lado da TAG.
-    Prova alternativa: download automático da guia capturado + Reiniciar visível +
-    ausência de overlay por uma janela estável. Isso evita falso erro quando o link
-    textual demora a ser exposto no DOM embora a guia já tenha sido efetivamente gerada.
+    Prova alternativa: PDF novo concluído pelo próprio Chrome. A automação não
+    captura nem dispara esse download; apenas observa a pasta Downloads.
     """
     limite = time.monotonic() + timeout_ms / 1000
-    inicio_alternativo: float | None = None
-
     while time.monotonic() < limite:
+        arquivo_guia = _novo_pdf_do_portal(downloads_antes)
+        if arquivo_guia is not None:
+            return _extrair_numero_guia(page), arquivo_guia
+
         if _overlay_carregamento_visivel(page):
-            inicio_alternativo = None
             page.wait_for_timeout(300)
             continue
 
         numero = _extrair_numero_guia(page)
-        download = downloads_emitir[0] if downloads_emitir else None
         if numero:
-            return numero, download
-
-        if download is not None and _reiniciar_visivel(page):
-            if inicio_alternativo is None:
-                inicio_alternativo = time.monotonic()
-            elif time.monotonic() - inicio_alternativo >= 2.0:
-                return None, download
-        else:
-            inicio_alternativo = None
+            return numero, arquivo_guia
 
         page.wait_for_timeout(400)
 
     numero = _extrair_numero_guia(page)
-    download = downloads_emitir[0] if downloads_emitir else None
+    arquivo_guia = _novo_pdf_do_portal(downloads_antes)
     if numero:
-        return numero, download
-    if download is not None and _reiniciar_visivel(page) and not _overlay_carregamento_visivel(page):
-        return None, download
+        return numero, arquivo_guia
+    if arquivo_guia is not None:
+        return None, arquivo_guia
 
     raise pf.PortalFlowError(
         "Após 'Emitir Guia', o portal não apresentou prova suficiente de conclusão em até 180 segundos: "
-        "nem número da guia identificável nem download automático da guia acompanhado do botão Reiniciar."
+        "nem número da guia identificável nem PDF novo concluído pelo Chrome."
     )
-
-
-def _link_da_guia(page: Page, numero_guia: str) -> Locator | None:
-    """Localiza o link único que o portal expõe para a guia emitida."""
-    try:
-        candidatos = []
-        for link in pf._visiveis(page.locator("a")):
-            if _normalizar_numero_guia(link.inner_text()) == numero_guia:
-                candidatos.append(link)
-        return candidatos[0] if len(candidatos) == 1 else None
-    except Exception:
-        return None
-
-
-def _baixar_guia_pelo_link(page: Page, numero_guia: str) -> Download | None:
-    """Recupera o PDF pelo número da guia quando o portal não o baixa sozinho."""
-    link = _link_da_guia(page, numero_guia)
-    if link is None:
-        return None
-    try:
-        with page.expect_download(timeout=20_000) as info:
-            link.scroll_into_view_if_needed()
-            link.click()
-        return info.value
-    except PlaywrightTimeoutError:
-        return None
-    except Exception:
-        return None
 
 
 def _texto_elemento(locator: Locator) -> str:
@@ -370,7 +353,7 @@ def _arquivo_pdf(caminho: Path) -> bool:
 
 
 def _salvar_guia_automatica(
-    download: Download | None,
+    download: Path | None,
     competencia: str,
     inscricao: str,
     numero_guia: str | None,
@@ -383,11 +366,11 @@ def _salvar_guia_automatica(
 
     pasta = _pasta_downloads(competencia, inscricao) / "GUIA"
     pasta.mkdir(parents=True, exist_ok=True)
-    nome_original = _nome_seguro(download.suggested_filename)
+    nome_original = _nome_seguro(download.name)
     destino = pasta / nome_original
 
     try:
-        download.save_as(str(destino))
+        shutil.copy2(download, destino)
     except Exception as exc:
         raise pf.PortalFlowError(f"A guia foi emitida, mas o download automático não pôde ser salvo: {exc}") from exc
 
@@ -469,36 +452,21 @@ def executar_fase5(
     log("[3/8] Aguardando a etapa Emitir Guia ficar totalmente desbloqueada e estável...")
     _aguardar_etapa_emitir_guia(page, timeout_ms=90_000)
 
-    downloads_emitir: list[Download] = []
+    downloads_antes = _estado_downloads_portal()
+    log("[4/8] Emitindo a guia; o portal fará o download automático...")
+    _clicar_emitir_guia_seguro(page, timeout_ms=90_000)
 
-    def _capturar_download(download: Download) -> None:
-        downloads_emitir.append(download)
-
-    page.on("download", _capturar_download)
-    try:
-        log("[4/8] Emitindo a guia e monitorando o download automático...")
-        _clicar_emitir_guia_seguro(page, timeout_ms=90_000)
-
-        log("[5/8] Aguardando a emissão REAL terminar...")
-        numero_guia, download_guia = _aguardar_emissao_confirmada(
-            page,
-            downloads_emitir,
-            timeout_ms=180_000,
-        )
-    finally:
-        try:
-            page.remove_listener("download", _capturar_download)
-        except Exception:
-            pass
+    log("[5/8] Aguardando a emissão e reconhecendo o PDF baixado pelo portal...")
+    numero_guia, download_guia = _aguardar_emissao_confirmada(
+        page,
+        downloads_antes,
+        timeout_ms=180_000,
+    )
 
     if numero_guia:
         log(f"Guia emitida confirmada. Número da guia: {numero_guia}.")
     else:
         log("Guia emitida confirmada pelo download automático + estado final do portal; número ainda não identificado.")
-
-    if download_guia is None and numero_guia:
-        log("O portal não iniciou o download automático; recuperando o PDF pelo link da guia emitida...")
-        download_guia = _baixar_guia_pelo_link(page, numero_guia)
 
     log("[6/8] Salvando a própria guia emitida em pasta controlada...")
     guia = _salvar_guia_automatica(download_guia, competencia, inscricao, numero_guia)
