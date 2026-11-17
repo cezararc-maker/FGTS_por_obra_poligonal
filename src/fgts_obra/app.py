@@ -169,6 +169,7 @@ class AppFGTS(tk.Tk):
             )
 
         venc_calc = resultado.vencimento_calculado.strftime("%d/%m/%Y")
+        venc_automacao = resultado.vencimento_automacao.strftime("%d/%m/%Y")
         venc_planilha = (
             resultado.vencimento_conferencia.strftime("%d/%m/%Y")
             if resultado.vencimento_conferencia
@@ -181,6 +182,7 @@ class AppFGTS(tk.Tk):
             f"Competência: {resultado.competencia}\n"
             f"Vencimento calculado: {venc_calc}\n"
             f"Vencimento da planilha (conferência): {venc_planilha}\n"
+            f"Vencimento usado na automação: {venc_automacao}\n"
             f"Registros válidos: {len(resultado.itens)} — CNPJ: {qtd_cnpj} | CNO: {qtd_cno}"
         )
         if resultado.avisos:
@@ -227,7 +229,7 @@ class AppFGTS(tk.Tk):
             f"Serviço: {item.servico}\n"
             f"TAG: {item.tag}\n"
             f"Competência: {self.resultado.competencia}\n"
-            f"Vencimento calculado: {self.resultado.vencimento_calculado:%d/%m/%Y}\n\n"
+            f"Vencimento usado na automação: {self.resultado.vencimento_automacao:%d/%m/%Y}\n\n"
             "A Fase 2 pode navegar, preencher filtros e clicar em Pesquisar.\n"
             "Ela NÃO seleciona débitos, NÃO adiciona à guia e NÃO emite guia."
         )

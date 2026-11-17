@@ -412,7 +412,7 @@ class AppFGTSFinal(AppFGTS):
         processo = contexto.Process(
             target=_executar_item_em_processo,
             args=(eventos, item, self.resultado.competencia,
-                  self.resultado.vencimento_calculado, indice, total),
+                  self.resultado.vencimento_automacao, indice, total),
             daemon=True,
         )
         self._processo_item = processo

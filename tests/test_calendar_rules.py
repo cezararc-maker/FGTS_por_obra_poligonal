@@ -11,6 +11,9 @@ class TestCalendarRules(unittest.TestCase):
     def test_mes_com_dia_20_util(self):
         self.assertEqual(calcular_vencimento_mensal(2026, 9), date(2026, 10, 20))
 
+    def test_antecipa_feriado_nacional_da_consciencia_negra(self):
+        self.assertEqual(calcular_vencimento_mensal(2026, 10), date(2026, 11, 19))
+
     def test_feriado_informado_antecipa(self):
         self.assertEqual(
             calcular_vencimento_mensal(2026, 9, {date(2026, 10, 20)}),

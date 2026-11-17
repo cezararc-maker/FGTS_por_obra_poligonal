@@ -112,6 +112,7 @@ class TestExcelReader(unittest.TestCase):
             self.assertEqual(resultado.competencia, "08/2026")
             self.assertEqual(resultado.vencimento_conferencia, date(2026, 9, 18))
             self.assertEqual(resultado.vencimento_calculado, date(2026, 9, 18))
+            self.assertEqual(resultado.vencimento_automacao, date(2026, 9, 18))
             self.assertEqual(len(resultado.itens), 1)
 
 

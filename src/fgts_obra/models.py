@@ -30,3 +30,8 @@ class ResultadoPlanilha:
     @property
     def valida(self) -> bool:
         return not self.erros
+
+    @property
+    def vencimento_automacao(self) -> date:
+        """Data a conferir no portal; a data informada na planilha prevalece."""
+        return self.vencimento_conferencia or self.vencimento_calculado
